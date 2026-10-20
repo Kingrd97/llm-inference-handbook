@@ -1,0 +1,1681 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="utf-8"><meta name="viewport" content="width=device-width,initial-scale=1">
+<title>从一次请求到自己的推理框架 · DeepInfer / vLLM / SGLang</title>
+<style>
+:root{--ink:#182a36;--muted:#5b6a75;--line:#dbe3e8;--accent:#176860;--paper:#fff;--code:#edf3f6}
+*{box-sizing:border-box}html{scroll-behavior:smooth;scroll-padding-top:28px}
+body{margin:0;background:#f3f5f6;color:var(--ink);font:16px/1.85 -apple-system,BlinkMacSystemFont,"Segoe UI","PingFang SC","Microsoft YaHei",sans-serif}
+a{color:var(--accent);text-underline-offset:3px;overflow-wrap:anywhere}a:hover{color:#083f3a}
+.sidebar{position:fixed;inset:0 auto 0 0;width:285px;padding:30px 20px;overflow:auto;border-right:1px solid var(--line);background:#f9fbfc}
+.brand{font-size:19px;font-weight:750;line-height:1.4;margin-bottom:10px}.eyebrow{font-size:11px;letter-spacing:1.4px;color:var(--accent);font-weight:700}
+.sidebar p{font-size:12px;color:var(--muted);line-height:1.65}.sidebar nav a{display:flex;gap:10px;text-decoration:none;font-size:13px;line-height:1.5;padding:7px 9px;border-radius:6px}.sidebar nav a:hover{background:#e6efec}.sidebar nav span{color:#8b9b9b;font-variant-numeric:tabular-nums}.assets{border-top:1px solid var(--line);margin-top:20px;padding-top:12px}.assets a{display:block;font-size:13px;margin:5px 0}
+main{margin-left:285px;padding:42px 50px 100px;max-width:1450px}article{background:var(--paper);padding:55px 60px;border:1px solid var(--line);border-radius:12px;box-shadow:0 4px 28px #1b384008;max-width:1120px;margin:auto}
+h1{font-size:36px;line-height:1.35;margin:0 0 12px;letter-spacing:-.7px}h2{font-size:25px;line-height:1.45;border-top:1px solid var(--line);padding-top:30px;margin-top:50px}h1+h2{font-size:21px;color:var(--muted);border:0;margin-top:0;padding-top:0;font-weight:500}h3{font-size:19px;margin-top:30px;line-height:1.5}
+p{margin:15px 0}li{margin:7px 0}strong{font-weight:700}code{font-family:"SFMono-Regular",Consolas,monospace;background:var(--code);padding:2px 5px;border-radius:4px;font-size:.85em;overflow-wrap:anywhere}pre{background:#112b34;color:#e7f2f0;padding:20px 22px;border-radius:8px;overflow-x:auto;font-size:13px;line-height:1.75;tab-size:4}pre code{padding:0;background:none;color:inherit;white-space:pre;overflow-wrap:normal;font-size:inherit}
+.table-scroll{overflow:auto;margin:22px 0}table{border-collapse:collapse;width:100%;font-size:14px;line-height:1.7;min-width:560px}th,td{text-align:left;vertical-align:top;padding:12px 14px;border:1px solid var(--line)}th{background:#eaf2ef;color:#163f39;font-weight:650}tr:nth-child(even) td{background:#fafcfc}blockquote{border-left:4px solid var(--accent);padding:5px 20px;background:#f1f7f4}hr{border:0;border-top:1px solid var(--line);margin:38px 0}.footer{font-size:12px;color:var(--muted);text-align:center;margin-top:28px}a[id]{display:block;scroll-margin-top:28px}
+@media(max-width:1100px){main{padding:25px 24px;margin-left:255px}.sidebar{width:255px}article{padding:35px 30px}}
+@media(max-width:800px){.sidebar{position:relative;width:auto;max-height:none;border-right:0;border-bottom:1px solid var(--line);padding:22px}.sidebar nav{display:grid;grid-template-columns:repeat(2,minmax(0,1fr))}.assets{display:flex;flex-wrap:wrap;gap:8px 18px}main{margin:0;padding:15px}article{padding:28px 20px}h1{font-size:29px}h2{font-size:23px}pre{padding:14px;font-size:12px}}
+@media print{body{background:#fff;font-size:10pt}.sidebar{display:none}main{margin:0;padding:0;max-width:none}article{border:0;box-shadow:none;padding:0;max-width:none}h2{break-before:page}h1+h2{break-before:auto}pre{white-space:pre-wrap;background:#f1f3f5;color:#111}pre code{white-space:pre-wrap}table{min-width:0;font-size:8pt}tr{break-inside:avoid}a{color:#222}.footer{display:none}}
+</style></head><body>
+<aside class="sidebar"><div class="eyebrow">LLM INFRA · SOURCE STUDY</div><div class="brand">从一次请求<br>到自己的推理框架</div><p>DeepInfer · vLLM · SGLang<br>固定版本研究 · 2026-10-20</p><nav><a href="#ch1"><span>01</span>先建立系统地图</a><a href="#ch2"><span>02</span>一个 token 怎样算出来</a><a href="#ch3"><span>03</span>KV cache：推理引擎的核心状态</a><a href="#ch4"><span>04</span>从单请求循环到连续批处理</a><a href="#ch5"><span>05</span>自己设计引擎时需要的对象与接口</a><a href="#ch6"><span>06</span>vLLM：从 token 预算看通用引擎</a><a href="#ch7"><span>07</span>SGLang：从请求、batch 与缓存树看运行时</a><a href="#ch8"><span>08</span>DeepInfer：从特定模型和硬件看协同优化</a><a href="#ch9"><span>09</span>内核、CUDA Graph 与异步执行</a><a href="#ch10"><span>10</span>多卡与 MoE：把一个模型拆开</a><a href="#ch11"><span>11</span>推测解码：一次验证多个未来 token</a><a href="#ch12"><span>12</span>P/D 分离：把两个阶段部署开</a><a href="#ch13"><span>13</span>三个项目的优劣与选型</a><a href="#ch14"><span>14</span>无需 GPU 的动手实验</a><a href="#ch15"><span>15</span>实现自己的框架：分阶段路线</a><a href="#ch16"><span>16</span>如何证明正确、如何证明更快</a><a href="#ch17"><span>17</span>按问题阅读源码</a><a href="#ch18"><span>18</span>自测题与参考答案</a><a href="#ch19"><span>19</span>术语速查与常见误解</a><a href="#ch20"><span>20</span>版本固定的资料索引</a><a href="#ch21"><span>21</span>负载均衡专题：官方部署说明与 DualPath 组内调度</a></nav><div class="assets"><a href="llm-inference-learning-kit.zip">下载完整学习包</a><a href="inference_lab.py">CPU 教学实验</a><a href="inference_lab_test_result.txt">8 项测试结果</a><a href="inference_lab_demo.txt">示例运行输出</a><a href="llm-inference-framework-handbook.md">Markdown 原稿</a></div></aside><main><article><h1>从一次请求到自己的推理框架</h1>
+<h2>DeepInfer、vLLM、SGLang 源码学习手册</h2>
+<p><strong>面向读者：</strong>刚进入 LLM infra，希望不仅会部署，还能理解和开发推理引擎的人。懂基本 Python、数组和服务端概念即可；公式都配有解释。</p>
+<p><strong>研究基线：2026-10-20，Asia/Shanghai。</strong>本文是固定版本的文档与源码分析，附可在 CPU 上运行的教学实验；没有进行三个框架的 GPU/NPU 性能对测。项目能力与限制以本次快照为准，性能选型结论以“待验证的工程判断”呈现。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>项目</th>
+<th>本次版本</th>
+<th>固定源码 SHA</th>
+<th>怎样理解这个版本</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>vLLM</td>
+<td>v0.32.0</td>
+<td><code>5df63a7203cdb9328d824a27b682e77c7b9928be</code></td>
+<td>2026-10-18 发布；本次核对时最新非预发布 release</td>
+</tr>
+<tr>
+<td>SGLang</td>
+<td>v0.5.22</td>
+<td><code>baa9befa381511cd4d56f83980951e5a45fffc6d</code></td>
+<td>2026-10-19 发布；本次核对时最新非预发布 release</td>
+</tr>
+<tr>
+<td>DeepInfer</td>
+<td>main 的固定快照</td>
+<td><code>8b16149741a4935e1dec8cea27853f273b374c5b</code></td>
+<td>不将 main 快照称作稳定发行版</td>
+</tr>
+</tbody>
+</table></div>
+<p>版本证据：<a href="#src-v0">V0</a>、<a href="#src-s0">S0</a>、<a href="#src-d1">D1</a>。后文源码链接固定到这些 SHA，避免学习过程中被 main 的变化误导。</p>
+<blockquote>
+<p><strong>新增负载均衡专题：</strong><a href="#ch21">直接阅读第 21 章</a>：DeepSeek 官方部署说明、DualPath Decode 组内算法、阈值公式、逐步算例与跨集群路由启发。</p>
+</blockquote>
+<h2>怎样使用这份手册</h2>
+<p>你需要建立的能力有三层：<strong>能解释一个 token 如何产生；能解释为什么并发请求会互相影响；能修改实现而不破坏正确性。</strong>记住功能名不是目标。</p>
+<ul>
+<li><strong>先读一遍主线：</strong>第 1～5 章。你会认识服务分层、模型计算、KV 内存和调度循环。</li>
+<li><strong>再对照项目：</strong>第 6～8 章。带着“状态在哪里、谁修改它、什么时候释放”的问题看源码。</li>
+<li><strong>理解性能机制：</strong>第 9～13 章。学习 kernel、并行、推测解码、P/D 和选型。</li>
+<li><strong>开始自己实现：</strong>第 14～17 章。运行实验，按里程碑开发，再做正确性与性能验收。</li>
+<li><strong>查漏补缺：</strong>第 18～20 章是练习、术语与证据索引。</li>
+<li><strong>负载均衡优先：</strong>先读第 21 章，区分官方生产部署说明、DualPath 组内算法与跨集群路由，再回到第 4、10、12、13 章。</li>
+</ul>
+<p>建议第一遍跳过较细的兼容限制，第二遍读源码时再回来核对。不要一开始尝试把所有优化组合打开。</p>
+<h2>目录</h2>
+<ol>
+<li><a href="#ch1">先建立系统地图</a></li>
+<li><a href="#ch2">一个 token 怎样算出来</a></li>
+<li><a href="#ch3">KV cache：推理引擎的核心状态</a></li>
+<li><a href="#ch4">从单请求循环到连续批处理</a></li>
+<li><a href="#ch5">自己设计引擎时需要的对象与接口</a></li>
+<li><a href="#ch6">vLLM：从 token 预算看通用引擎</a></li>
+<li><a href="#ch7">SGLang：从请求、batch 与缓存树看运行时</a></li>
+<li><a href="#ch8">DeepInfer：从特定模型和硬件看协同优化</a></li>
+<li><a href="#ch9">内核、CUDA Graph 与异步执行</a></li>
+<li><a href="#ch10">多卡与 MoE：把一个模型拆开</a></li>
+<li><a href="#ch11">推测解码：一次验证多个未来 token</a></li>
+<li><a href="#ch12">P/D 分离：把两个阶段部署开</a></li>
+<li><a href="#ch13">三个项目的优劣与选型</a></li>
+<li><a href="#ch14">无需 GPU 的动手实验</a></li>
+<li><a href="#ch15">实现自己的框架：分阶段路线</a></li>
+<li><a href="#ch16">如何证明正确、如何证明更快</a></li>
+<li><a href="#ch17">按问题阅读源码</a></li>
+<li><a href="#ch18">自测题与参考答案</a></li>
+<li><a href="#ch19">术语速查与常见误解</a></li>
+<li><a href="#ch20">版本固定的资料索引</a></li>
+<li><a href="#ch21">负载均衡专题：官方部署说明与 DualPath 组内调度</a></li>
+</ol>
+<p><a id="ch1"></a></p>
+<h2>1. 先建立系统地图</h2>
+<h3>1.1 模型、引擎、服务平台分别是什么</h3>
+<p>一个模型主要给出数学计算和权重：给定前面的 token，下一 token 的概率分布是什么。推理引擎负责让这个计算在有限内存和设备上高效执行。推理服务还要负责 HTTP、排队、流式响应、取消、健康检查、弹性扩缩容等。</p>
+<p>把它们画在一张图上：</p>
+<pre><code class="language-text">用户 / SDK
+    │  对话、采样参数、超时
+    ▼
+API 与全局路由                  选模型、租户、区域/集群
+    │
+    ▼
+集群内的实例 / P-D 路由         选哪个副本；必要时选 P 和 D 配对
+    │
+    ▼
+Tokenizer / 请求管理           文本 → token IDs，跟踪请求生命周期
+    │
+    ▼
+引擎 Scheduler                 本轮算哪些请求、各算多少 token
+    │                  ↔ KV / 状态管理器
+    ▼
+Executor / Model Runner        组织张量、并行通信、调用模型
+    │
+    ▼
+Attention / GEMM / MoE kernels  GPU/NPU 上的实际计算
+    │
+    ▼
+Sampler → Detokenizer → 流式输出
+    └──────── 更新状态，进入下一轮 ────────┘
+</code></pre>
+<p>这是一张教学分层图，不代表每个框架都用相同进程划分。模块可以同进程，也可以跨进程或跨机器。一个“模型实例”也可能由很多张卡共同组成。</p>
+<h3>1.2 四种“调度”不能混为一谈</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>决策</th>
+<th>决策对象</th>
+<th>典型信号</th>
+<th>例子</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>跨集群分流</td>
+<td>新请求去哪个集群</td>
+<td>SLO、可用容量、在途负载、区域约束</td>
+<td>跨集群路由器</td>
+</tr>
+<tr>
+<td>实例路由</td>
+<td>去哪个服务副本 / P-D 配对</td>
+<td>队列、缓存亲和、健康、目的端 KV 余量</td>
+<td>vLLM DP 路由、SGLang gateway 的相应功能</td>
+</tr>
+<tr>
+<td>引擎迭代调度</td>
+<td>本次 forward 放哪些 token</td>
+<td>token 预算、KV、请求状态、图尺寸</td>
+<td>三者各自的 scheduler</td>
+</tr>
+<tr>
+<td>专家布局与通信</td>
+<td>expert 放到哪张卡、token 发给谁</td>
+<td>每 expert/rank 负载、通信拓扑</td>
+<td>EP / EPLB</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>上层路由器 跨集群路由与 DeepInfer 的 step 调度不是同一层。</strong>“跨多机”也不自动等于“跨多个服务集群”：一个同步 EP 实例可能跨很多机器，却仍共同完成同一次模型计算。</p>
+<p>vLLM 和 SGLang 的部署文档覆盖实例路由与分布式执行；DeepInfer 这次公开包明确未包含完整 P/D 副本负载均衡。不能把它们直接视作 上层路由器 的替代品。<a href="#src-v6">V6</a>、<a href="#src-s6">S6</a>、<a href="#src-d1">D1</a></p>
+<h3>1.3 三个项目为什么值得一起读</h3>
+<ul>
+<li><strong>vLLM：</strong>适合学习一个通用引擎如何定义请求、调度输出、KV 管理、执行器和扩展接口。</li>
+<li><strong>SGLang：</strong>适合学习缓存复用、batch 生命周期、层级缓存与服务路径怎样联动。</li>
+<li><strong>DeepInfer：</strong>适合学习当模型与硬件边界较明确时，调度、推测执行、内核和并行布局如何协同设计。</li>
+</ul>
+<p>这是本文的学习顺序与阅读视角，不是能力的排他分类。vLLM 也有模型特化，SGLang 也有通用抽象，DeepInfer 也有请求与块管理。DeepInfer README 还明确说明其最初主要基于 vLLM，并受 SGLang、TensorRT-LLM 启发；它们不是三套毫无关联的理论。<a href="#src-v1">V1</a>、<a href="#src-s1">S1</a>、<a href="#src-d1">D1</a></p>
+<p><a id="ch2"></a></p>
+<h2>2. 一个 token 怎样算出来</h2>
+<h3>2.1 自回归不是一次把整段回答算出来</h3>
+<p>Tokenizer 把文本变成整数序列，例如 <code>[17, 82, 9]</code>。token 不必等于一个字或一个词。</p>
+<p>模型输入这个前缀，输出词表中每个 token 的分数，称为 <strong>logits</strong>。Sampler 根据 greedy、temperature、top-k、top-p 等规则选出下一个 token。假设选出 <code>31</code>，接着用 <code>[17, 82, 9, 31]</code> 预测下一个。</p>
+<pre><code class="language-text">已知 prompt ──forward──&gt; logits ──sample──&gt; y1
+prompt + y1 ──forward──&gt; logits ──sample──&gt; y2
+prompt + y1 + y2 ──────&gt; ...
+</code></pre>
+<p>因为 <code>y2</code> 依赖 <code>y1</code>，普通自回归不能直接独立并行生成任意未来 token。推测解码是绕过部分串行成本的方法，后面会讲，但仍需要主模型验证。</p>
+<h3>2.2 Transformer 中 Q、K、V 在做什么</h3>
+<p>只看一层、一个 attention head。每个位置的隐状态 <code>x</code> 乘上三个权重，得到：</p>
+<pre><code class="language-text">q = x Wq       本位置想查什么
+k = x Wk       本位置提供怎样的匹配信息
+v = x Wv       本位置提供什么内容
+</code></pre>
+<p>位置 <code>t</code> 的注意力计算可以写成：</p>
+<pre><code class="language-text">score[j] = dot(q[t], k[j]) / sqrt(head_dim),  j ≤ t
+weight = softmax(score)
+attention[t] = Σ weight[j] × v[j]
+</code></pre>
+<p>因果约束 <code>j ≤ t</code> 表示只能看自己和过去。真实模型还有多个 head、多层、位置编码、归一化、残差和 FFN/MoE。这里先保留与推理系统最相关的事实：<strong>下一个位置需要过去位置的 K/V，但过去的 Q 通常不用留给未来位置。</strong></p>
+<p>过去位置不能看未来，因此在模型权重、位置和上下文不变时，已经算出的历史 K/V 可以复用。这就是 KV cache 的基础。</p>
+<h3>2.3 Prefill 与 Decode</h3>
+<p><strong>Prefill：</strong>处理已知 prompt，填充历史 K/V，并通常从最后一个 prompt 位置得到第一个输出 token。prompt 已知，所以多个位置的计算可以组织成大矩阵操作，因果 mask 保证不看未来。</p>
+<p><strong>Decode：</strong>每次把刚生成的 token 作为新输入，追加它的 K/V，得到下一 token。对于普通解码，每条活跃序列每轮通常只处理一个新位置。</p>
+<p>一个容易错一位的例子：</p>
+<pre><code class="language-text">输入 a b c
+Prefill(a,b,c) → 生成 d     KV 已包含 a,b,c；通常尚未包含 d
+Decode(d)     → 生成 e     KV 已包含 a,b,c,d；通常尚未包含 e
+</code></pre>
+<p>所以“已输出 token 数”“已计算位置数”“已预留 KV 槽位数”不是同一个数。推测执行和异步调度会让它们更不一致。</p>
+<h3>2.4 为什么两个阶段的瓶颈不同</h3>
+<p>粗略看，长 prompt Prefill 的 attention 工作量随上下文长度平方增长；单个 Decode 新位置读取的历史 KV 随上下文长度线性增长。模型的线性投影和 FFN 又有不同的计算量。</p>
+<p>长 Prefill 往往更容易形成较大的矩阵乘法，提高计算单元利用率；小 batch Decode 往往更受权重/KV 读取带宽和 kernel launch 成本影响。但不能把它们永久标签化为“Prefill 纯算力瓶颈、Decode 纯带宽瓶颈”：batch、MoE 通信、量化、长上下文、硬件都会改变瓶颈。</p>
+<p>可以用一个分析下界理解，而不是当作精确预测器：</p>
+<pre><code class="language-text">step 时间 ≥ max(本轮 FLOPs / 有效算力, 本轮数据量 / 有效带宽)
+</code></pre>
+<p>实际还包括调度、同步、通信、数据搬运和无法隐藏的串行部分。这个下界说明：减少 FLOPs 不一定降低时延，减少带宽访问也不一定改善计算受限的 batch。</p>
+<h3>2.5 你必须会区分的时延</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>指标</th>
+<th>含义</th>
+<th>常见误读</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TTFT</td>
+<td>请求发出到收到第一个输出 token</td>
+<td>不只是某个 Prefill kernel 的时间</td>
+</tr>
+<tr>
+<td>ITL</td>
+<td>相邻输出 token 的间隔</td>
+<td>网络 chunk 不一定一块一个 token</td>
+</tr>
+<tr>
+<td>TPOT</td>
+<td>常见口径为 <code>(末 token 时间−首 token 时间)/(输出数−1)</code></td>
+<td>平均值掩盖卡顿；输出数不足 2 时不适用</td>
+</tr>
+<tr>
+<td>E2E</td>
+<td>从发请求到请求结束</td>
+<td>长输出自然更大，比较要控制长度分布</td>
+</tr>
+<tr>
+<td>吞吐</td>
+<td>单位时间完成请求或输出 token 数</td>
+<td>不能省略质量、成功率和时延约束</td>
+</tr>
+<tr>
+<td>Goodput</td>
+<td>满足指定 SLO 的有效工作 / 时间</td>
+<td>先定义什么算成功、哪些 SLO 同时满足</td>
+</tr>
+</tbody>
+</table></div>
+<p>后文实验中的“轮次”不是毫秒。不同 batch 的每轮耗时不同。</p>
+<p><a id="ch3"></a></p>
+<h2>3. KV cache：推理引擎的核心状态</h2>
+<h3>3.1 先算一遍显存账</h3>
+<p>对常规 dense attention / GQA，忽略分页、对齐、共享、分片和临时空间：</p>
+<pre><code class="language-text">每 token KV 字节数 = 2 × 层数 × KV head 数 × head_dim × 元素字节数
+总 KV 字节数 = 每 token KV 字节数 × 所有序列的已缓存 token 数
+</code></pre>
+<p><code>2</code> 是 K 与 V。GQA 的 KV head 数可以小于 query head 数；别拿 query head 数代进去。</p>
+<p><strong>教学例子，非任何项目的实测配置：</strong>32 层、8 个 KV heads、head_dim=128、BF16 每元素 2 字节：</p>
+<pre><code class="language-text">2 × 32 × 8 × 128 × 2 = 131072 bytes = 128 KiB / token
+一个 8192-token 的上下文约 1 GiB KV
+32 条这样的序列约 32 GiB KV
+</code></pre>
+<p>这还没算权重、activation、通信 buffer、图捕获、draft 模型和碎片。权重约 <code>参数量×每参数字节数</code> 也只是起点；量化 scales、未量化层、临时张量会增加实际占用。</p>
+<p>MLA、SWA、线性 attention / Mamba、跨层 KV 复用不能直接照套这条总公式。需要按各层实际缓存状态求和。并行后每卡占用也未必简单除以卡数，例如部分 KV heads 或状态可能复制。<a href="#src-v5">V5</a>、<a href="#src-s4">S4</a>、<a href="#src-d6">D6</a></p>
+<h3>3.2 为什么分页</h3>
+<p>朴素方案为每条请求分配“最大上下文长度”的连续内存。问题是输出长度事先不确定，预留会浪费，扩容可能搬运。</p>
+<p>分页方案把内存切成固定大小的 block。逻辑上连续的 token，通过 block table 指向物理页：</p>
+<pre><code class="language-text">假设每页 4 token
+
+请求 A： 逻辑页 0       逻辑页 1       逻辑页 2
+            │             │             │
+物理页：    #7            #2            #11
+内容：     a b c d       e f g h       i _ _ _
+
+token 6 → 逻辑页 floor(6/4)=1，页内偏移 2 → 物理页 #2 的偏移 2
+</code></pre>
+<p>这样新增 token 通常只需补页，不需要整条序列搬家。尾页仍可能有浪费；页太小则索引、分配和 kernel 访存管理成本增加。页大小是内存利用率和执行效率之间的取舍。</p>
+<p><strong>Paged KV 管内存布局；Paged Attention kernel 负责按这个布局读取。</strong>只有 Python 字典式 block table 并不会自动得到高性能 attention。</p>
+<h3>3.3 Prefix cache 与普通 KV cache 是两件事</h3>
+<ul>
+<li>请求内 KV cache：同一条请求的下一步不重复算历史。</li>
+<li>Prefix cache：另一条请求具有相同前缀时，复用已有的历史 KV，减少 Prefill。</li>
+</ul>
+<p>例如两条 prompt 都以同一个长 system prompt 开头。第一条算过之后，第二条可能直接复用这些页。它主要减少重复输入计算，<strong>不会使每个新的 Decode token 不再需要 attention</strong>。</p>
+<p>复用要求的不只是“文本看起来一样”。token 序列、模型/权重版本、位置语义、LoRA、多模态输入、缓存命名空间等都可能影响有效性。一个共享缓存系统必须明确缓存身份；不能让不同模型误用同一页。</p>
+<h3>3.4 vLLM 的 hash block 与 SGLang 的 radix tree</h3>
+<p>两者都能做 prefix caching，差异是组织方式。<a href="#src-v4">V4</a>、<a href="#src-s3">S3</a></p>
+<p><strong>vLLM 的主要路径：</strong>每个满 block 用“父 block hash + 当前 block token + 额外身份信息”建立 key。查找时从前往后找可复用 block。父 hash 让相同 token 块在不同历史位置不会被错误视为相同上下文。</p>
+<p><strong>SGLang 的 radix 路径：</strong>把 token 前缀组织成压缩前缀树。共享前缀对应共享树路径；分叉处拆节点，沿路径查最长匹配前缀。节点持有对应缓存位置及锁定/淘汰信息。page size 仍约束可复用粒度，不能把“radix tree”理解成任意位置都可零成本复用。</p>
+<pre><code class="language-text">请求 1：A B C D X
+请求 2：A B C D Y Z
+
+radix：root ──[A B C D]──┬──[X]
+                         └──[Y Z]
+
+hash： h0 = hash(root, [A B C D], namespace)
+       h1/h2 在共享父 h0 后分叉（示意，非实际 block 长度）
+</code></pre>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>设计问题</th>
+<th>hash block 视角</th>
+<th>radix tree 视角</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>怎么识别前缀</td>
+<td>链式 block 身份</td>
+<td>共享树路径</td>
+</tr>
+<tr>
+<td>怎么复用</td>
+<td>匹配块并增加引用</td>
+<td>匹配节点/位置并锁定路径</td>
+</tr>
+<tr>
+<td>元数据复杂度来自哪里</td>
+<td>hash、block pool、请求映射</td>
+<td>树分裂/合并、路径锁、节点状态</td>
+</tr>
+<tr>
+<td>常见学习价值</td>
+<td>内容寻址与物理页生命周期分离</td>
+<td>前缀结构与淘汰/层级缓存联动</td>
+</tr>
+</tbody>
+</table></div>
+<p>这些是结构差异，不足以单独推出速度排名。命中分布、CPU 开销、页大小、attention backend 和并发行为都要测。</p>
+<h3>3.5 共享、写时复制与回收</h3>
+<p>一个安全的最小设计需要以下约束：</p>
+<ol>
+<li>共享的已完成页不能被某个请求随意覆写。</li>
+<li>如果允许共享未满尾页，后续写入前要做 copy-on-write，或通过设计禁止这种共享。</li>
+<li>请求结束只释放它自己的引用；其他请求或缓存仍可能持有该页。</li>
+<li>可淘汰不等于已经清空。无活跃请求引用的缓存页可能保留内容直到被重用。</li>
+<li>异步 GPU 操作尚在读取时，即使 CPU 已收到 cancel，也不能立刻把页交给新请求。</li>
+</ol>
+<p>注意实现细节：vLLM 的 block <code>ref_cnt</code> 表示活跃请求使用情况；零引用的缓存块仍可能存在于 cache map 和 free queue 中。教学实验采用更简单的“缓存本身也持一份所有权”模型，二者记账方式不同，不应逐字段对照。<a href="#src-v4">V4</a></p>
+<h3>3.6 层级缓存和混合状态</h3>
+<p>GPU KV 最快、也最贵。把不活跃前缀放到 CPU 内存甚至外部存储，可以换取更大容量；重新使用时要搬回来。收益条件是：<strong>省下的重算时间，大于查找、传输、等待和争用增加的时间。</strong></p>
+<p>SGLang HiCache 区分实例私有的 GPU L1、host L2 与可配置共享的 storage L3。L2 不因为容量大就变成全局共享缓存。vLLM 有 Offloading/第三方 KV connector 等路径，不能说它没有层级缓存。<a href="#src-s5">S5</a>、<a href="#src-v7">V7</a></p>
+<p>混合模型更难：full attention 需要整个历史；SWA 只保留窗口；Mamba 类状态有递推/检查点语义。统一缓存系统需要管理多种状态，而不是一个所有层通用的 <code>tokens × K × V</code> 数组。SGLang 此版本已有 <code>UnifiedRadixCache</code> 及 Full/SWA/Mamba 组件；vLLM 有 hybrid KV manager。阅读设计文档还要注意文档自己的历史版本说明，最终以固定源码为准。<a href="#src-s4">S4</a>、<a href="#src-v5">V5</a></p>
+<p><a id="ch4"></a></p>
+<h2>4. 从单请求循环到连续批处理</h2>
+<h3>4.1 三种 batch</h3>
+<p><strong>静态 batch：</strong>先凑一组请求，整组结束后再接下一组。短请求等长请求，设备也容易留下空位。</p>
+<p><strong>连续批处理：</strong>每轮都能移除完成请求、接入新请求，batch 成员随时间变化。请求之间的独立计算被放在同一轮执行，但每条序列自己的依赖仍需保持。</p>
+<p><strong>Chunked Prefill：</strong>长 prompt 分成多个 chunk，避免单次长 Prefill 长时间占住设备、拖慢已有 Decode。它改变调度粒度，不是截断输入；每个 chunk 仍然要正确读取前面已算的历史。</p>
+<p>三者在这里是通用机制。当前三项目的具体实现不能用早年的“某项目只支持静态 batch”概括。<a href="#src-v2">V2</a>、<a href="#src-s2">S2</a>、<a href="#src-d2">D2</a></p>
+<h3>4.2 用同一组请求走四轮</h3>
+<p>设每轮最多处理 <strong>6 个新输入位置</strong>，先服务已有 Decode，再处理 Prefill，每条 Prefill 本轮至多 3 token。A、B 已在 Decode，C 新到达、prompt 长 6；下一轮 D 到达、prompt 长 3。忽略 KV 不足，假设 A/B 足够长。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>轮次</th>
+<th>安排</th>
+<th style="text-align: right;">本轮 token 数</th>
+<th>本轮结束的状态</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>1</td>
+<td>A decode 1、B decode 1、C prefill 3</td>
+<td style="text-align: right;">5</td>
+<td>C 已算 3/6，尚无首 token</td>
+</tr>
+<tr>
+<td>2</td>
+<td>A 1、B 1、C prefill 3、D prefill 1</td>
+<td style="text-align: right;">6</td>
+<td>C 完成 Prefill，产生首 token；D 1/3</td>
+</tr>
+<tr>
+<td>3</td>
+<td>A 1、B 1、C decode 1、D prefill 2</td>
+<td style="text-align: right;">5</td>
+<td>D 完成 Prefill，产生首 token</td>
+</tr>
+<tr>
+<td>4</td>
+<td>A 1、B 1、C 1、D decode 1</td>
+<td style="text-align: right;">4</td>
+<td>四条持续生成</td>
+</tr>
+</tbody>
+</table></div>
+<p>表中的 token 数是<strong>本轮计算预算</strong>，不是活跃请求总历史长度，也不是本轮输出数。Prefill 3 个位置通常不会向用户输出 3 个回答 token。</p>
+<p>为什么第一轮不把 C 的剩余 1 个预算也用上？因为这个例子规定 Prefill 每请求 chunk 上限为 3。这说明 token budget、per-request chunk、max sequences 是不同约束，可能让预算有剩余。</p>
+<p>这不是任何一个框架默认策略的精确复现，是帮助你推演状态的教学规则。</p>
+<h3>4.3 token budget 之外还有哪些约束</h3>
+<p>一个可执行的 batch 至少同时满足：</p>
+<pre><code class="language-text">本轮计算 token 总数 ≤ token budget
+活跃序列数 ≤ sequence budget
+需要的 KV 页 + 在途预留 ≤ 可用/可回收页
+模型长度、grammar、LoRA、并行与 backend 等兼容条件成立
+</code></pre>
+<p>1 个 Prefill token 与 1 个长上下文 Decode token 耗时不相等，所以 token budget 是便于实现的控制量，不是精确成本模型。</p>
+<p>KV 不够时可以延后接入、驱逐闲置前缀、回收并重算某些请求、offload，或拒绝过载请求。不同选择分别影响 TTFT、ITL、吞吐和网络/存储成本。所谓 preemption/retraction 通常不是免费暂停：恢复可能需要重算。</p>
+<h3>4.4 吞吐、公平性和尾延迟为什么冲突</h3>
+<p>更大的 batch 常能摊薄权重读取和 launch 开销，但单轮时间也可能变长。优先缓存命中的请求可能提高整体吞吐，却让冷请求等待更久；一直优先 Decode 可保护在途请求，但 Prefill 可能饥饿。</p>
+<p>一个可落地的调度策略要声明：服务目标是什么、允许谁等待多久、过载时如何退化。不要把“GPU 一直忙”视作充分正确的目标。第 16 章会把这些变成可以测的验收条件。</p>
+<p><a id="ch5"></a></p>
+<h2>5. 自己设计引擎时需要的对象与接口</h2>
+<p>以下是教学接口，并不是从某一项目复制的 API。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>对象</th>
+<th>最少需要的信息</th>
+<th>容易犯的错</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Request</td>
+<td>request_id、输入、采样参数、期限、状态</td>
+<td>混淆请求终止和 GPU 工作完成</td>
+</tr>
+<tr>
+<td>Sequence</td>
+<td>token IDs、已算位置、输出位置、块映射</td>
+<td>把 emitted/computed/reserved 合成一个数</td>
+</tr>
+<tr>
+<td>Scheduler</td>
+<td>waiting/running、预算、公平规则</td>
+<td>先改状态再发现分配失败，却不回滚</td>
+</tr>
+<tr>
+<td>KV manager</td>
+<td>页池、引用、命中、预留、释放</td>
+<td>取消时提前释放在途页</td>
+</tr>
+<tr>
+<td>Batch plan</td>
+<td>请求/位置/长度/块表/执行模式</td>
+<td>Runner 重排后结果映射错请求</td>
+</tr>
+<tr>
+<td>Runner</td>
+<td>模型、device buffers、kernel/graph、通信</td>
+<td>输入元数据与实际 KV 布局不一致</td>
+</tr>
+<tr>
+<td>Sampler</td>
+<td>logits 变换、随机数、grammar/stop 状态</td>
+<td>推测回滚后 grammar 或 RNG 不一致</td>
+</tr>
+<tr>
+<td>Output processor</td>
+<td>token→文本、增量输出、完成事件</td>
+<td>Unicode/stop 跨 token 边界处理错误</td>
+</tr>
+</tbody>
+</table></div>
+<p>可以先写同步主循环：</p>
+<pre><code class="language-python">while has_work():
+    ingest_requests_and_cancellations()
+    plan = scheduler.plan(kv_manager)   # 选择、检查、预留；明确事务边界
+    if plan.empty:
+        wait_for_input_or_resources()
+        continue
+    result = runner.execute(plan)       # 使用计划指定的 token 与块表
+    scheduler.commit(plan, result)     # 前进位置、处理输出/结束/回退
+    release_resources_when_safe()
+    emit_outputs()
+</code></pre>
+<p>逐个回答这几个问题，你就开始具备读引擎源码的能力：</p>
+<ul>
+<li><code>plan</code> 创建后，请求可能被取消吗？谁识别这个变化？</li>
+<li>执行失败，已经预留的页怎样撤销？</li>
+<li>CPU 提交的是第 n+1 轮，用户刚取消第 n 轮所属请求，哪一轮结果还允许输出？</li>
+<li>一个 token 已经被采样但尚未写 KV，下一轮从哪个位置开始？</li>
+<li>batch 被重排、压缩或 padding 后，如何还原 request_id？</li>
+</ul>
+<p>真实框架的难点往往就在这些状态边界，而不是 <code>model.forward()</code> 这一行。</p>
+<p><a id="ch6"></a></p>
+<h2>6. vLLM：从 token 预算看通用引擎</h2>
+<h3>6.1 先画出调用主线</h3>
+<p>下面省略了 API server 的众多入口和各硬件特化：</p>
+<pre><code class="language-text">请求入口 / AsyncLLM
+        │
+        ▼
+EngineCore / EngineCoreProc
+        │
+        ├─ Scheduler.schedule()
+        │      └─ KVCacheManager → BlockPool
+        │
+        ├─ model_executor.execute_model(SchedulerOutput)
+        │      └─ Worker → GPUModelRunner → model / attention / sampler
+        │
+        └─ Scheduler.update_from_output()
+               └─ 输出增量、完成/取消、回收
+</code></pre>
+<p><code>EngineCore.step()</code> 源码可以直接看到 schedule、非阻塞 execute、处理 abort 和 update 的顺序；<code>step_with_batch_queue()</code> 则引入在途 batch 队列。不是所有模式都走完全相同的执行分支。<a href="#src-v2">V2</a></p>
+<h3>6.2 最值得学习的抽象：尚未计算的 token</h3>
+<p>固定版本的 scheduler 注释明确表达：核心调度不必用“Prefill 阶段 / Decode 阶段”二分来描述每条请求，而是追赶：</p>
+<pre><code class="language-text">num_computed_tokens
+        → num_tokens_with_spec
+</code></pre>
+<p>后者包含 prompt、输出和 speculative token。实际实现还要考虑 output placeholders、lookahead、长 prompt chunk 阈值等，不能把上面两个量之差当作全部代码。</p>
+<p>这个抽象的好处是统一解释：</p>
+<ul>
+<li>新请求：很多 prompt 位置尚未计算。</li>
+<li>普通 Decode：新生成的一个位置尚未计算。</li>
+<li>Prefix hit：前面的一部分已经有可复用计算。</li>
+<li>Speculation：还有多个候选位置待验证。</li>
+</ul>
+<p><strong>“统一调度计数”不表示底层 kernel 不区分执行类型，也不表示每 token 成本相同。</strong>执行层仍需要不同 attention 元数据、graph 与采样处理。<a href="#src-v3">V3</a></p>
+<h3>6.3 KV 管理器怎样与 scheduler 配合</h3>
+<p><code>get_computed_blocks()</code> 查已算好的前缀；<code>allocate_slots()</code> 处理复用与新增槽位。调度器必须确保 batch 的计算预算和可分配的 KV 同时满足。分配失败可能触发延后或 preemption。</p>
+<p><code>BlockPool</code> 管物理块、引用和可回收队列。把“请求该算什么”与“物理块怎么管理”拆开后，scheduler 不必直接操作 GPU KV tensor。这是自己设计通用框架时很值得学习的边界。<a href="#src-v4">V4</a></p>
+<h3>6.4 V1 engine 与 Model Runner V2 不要混淆</h3>
+<p>本版本源码仍在 <code>vllm/v1/</code> 下，同时存在：</p>
+<ul>
+<li><code>vllm/v1/worker/gpu_model_runner.py</code></li>
+<li><code>vllm/v1/worker/gpu/model_runner.py</code>，其中有 Model Runner V2 相关实现。</li>
+</ul>
+<p>不要根据目录名字推断“V1 engine 已经整个被 V2 替换”，也不要只读旧路径就认为新版没有新执行路径。实际选择受版本配置与支持范围约束；阅读时先从运行入口追到实际实例化的 Runner。<a href="#src-v10">V10</a></p>
+<h3>6.5 优势与代价</h3>
+<p><strong>优势：</strong>通用请求/执行边界、较广的模型和硬件接口、KV connector 等扩展位置，适合研究如何让一个引擎容纳多种模型和部署方式。<a href="#src-v1">V1</a>、<a href="#src-v7">V7</a></p>
+<p><strong>代价：</strong>灵活性带来兼容矩阵。一个 connector 支持的 TP/PP、KV layout、hybrid state、speculation 组合不一定适用于另一个。抽象接口减少局部耦合，不会消除跨模块的正确性依赖。</p>
+<p><strong>我的学习建议：</strong>第一次只追同步的普通文本生成：<code>EngineCore → Scheduler → KVCacheManager → Runner → update</code>。先理解不带 connector、不带 speculation 的闭环，再加一个变量。</p>
+<p><a id="ch7"></a></p>
+<h2>7. SGLang：从请求、batch 与缓存树看运行时</h2>
+<h3>7.1 先区分 SGLang 的不同部分</h3>
+<p>SGLang 不只是一个用于编排生成的前端语言。本文重点是其服务运行时 SRT，以及与它配合的 gateway、缓存和模型执行。也不要把整个项目简单缩写为 RadixAttention；radix cache 是理解其运行时的一条入口。<a href="#src-s1">S1</a></p>
+<p>常见服务路径可以这样看：</p>
+<pre><code class="language-text">HTTP / OpenAI-compatible frontend
+          │
+          ▼
+TokenizerManager            输入处理、请求跟踪
+          │
+          ▼
+Scheduler                   接入请求、选择 batch、处理结果
+          ├─ Req / ScheduleBatch
+          ├─ prefix cache / KV pool / HiCache
+          └─ TP worker / ModelRunner → 模型与 kernels
+          │
+          ▼
+DetokenizerManager          token 增量转文本
+          │
+          └─ 返回到请求管理与流式响应
+</code></pre>
+<p>实际进程、IPC 和并行拓扑依配置变化。上图画的是职责关系，不是对每一种模式的进程数量承诺。<a href="#src-s2">S2</a>、<a href="#src-s10">S10</a></p>
+<h3>7.2 从 event loop 看设计</h3>
+<p><code>event_loop_normal()</code> 的核心顺序很直接：</p>
+<pre><code class="language-text">ingest_requests
+→ get_next_batch_to_run
+→ run_batch
+→ process_batch_result
+</code></pre>
+<p><code>get_next_batch_to_run()</code> 会处理已有 batch、新 Prefill、缓存相关事件与同步要求。<code>ScheduleBatch</code> 明确承载执行阶段和序列状态；这与 vLLM scheduler 注释强调统一 token 进度的表达方式不同。</p>
+<p>但不能把差异夸大为“vLLM 能混合调度，SGLang 只能把 P/D 完全隔开”。SGLang 有 chunked/mixed batch 等路径；应按所选配置追实际分支。<a href="#src-s2">S2</a></p>
+<h3>7.3 缓存树影响的不只是命中率</h3>
+<p>一个请求进入 Prefill 前，查到的可复用前缀会减少剩余输入工作，并影响是否能接入。活跃请求锁住的路径不能像闲置缓存一样随意淘汰。请求结束后，部分数据还能留给后续请求使用。</p>
+<p>因此“排谁、能排多少、淘汰谁”会互相影响。你阅读 <code>match_prefix / insert / evict / inc_lock_ref / dec_lock_ref</code> 时，要同时观察 scheduler 何时调用它们。<a href="#src-s3">S3</a></p>
+<p>最新代码还包含 <code>UnifiedRadixCache</code> 和 Full/SWA/Mamba 等组件。不要把网上早期教程里的单一 radix tree 当成所有模型当前的完整缓存实现。是否采用哪个 cache class，需要看模型和运行配置。<a href="#src-s4">S4</a></p>
+<h3>7.4 overlap event loop 的实际依赖</h3>
+<p><code>event_loop_overlap()</code> 会先启动当前 batch 的设备工作，再处理上一 batch 的结果；当前 batch 的采样在必要的上一轮状态处理之后进行。源码有 result queue、batch copy，以及读写依赖的 barrier。</p>
+<p>这展示了一个关键思想：<strong>隐藏 CPU 工作需要管理多个不同时间点的状态，而不只是开一个线程。</strong>grammar 等状态可能依赖上一轮输出，不能为了 overlap 让它读取错误版本。<a href="#src-s2">S2</a></p>
+<h3>7.5 优势与代价</h3>
+<p><strong>优势：</strong>缓存复用、HiCache、P/D、实例路由的相关文档与实现联系较直接，适合学习这些功能怎样组成完整服务路径。其模型、硬件、LoRA、多模态覆盖也很广，不应视作只支持某种 DeepSeek 部署。<a href="#src-s1">S1</a>、<a href="#src-s5">S5</a>、<a href="#src-s6">S6</a></p>
+<p><strong>代价：</strong>缓存树、分层传输、混合状态和 speculation 发生组合时，状态同步很复杂。能单独开启某个功能，不代表该功能和所有其他优化都兼容。</p>
+<p><strong>我的学习建议：</strong>先跑通 <code>Req → ScheduleBatch → event_loop_normal</code>；再沿一个 prefix hit 追引用增减；最后才看 overlap 和 HiCache。不要从最复杂的 MoE + P/D + DSpark 组合起步。</p>
+<p><a id="ch8"></a></p>
+<h2>8. DeepInfer：从特定模型和硬件看协同优化</h2>
+<h3>8.1 公开包的范围是比较的前提</h3>
+<p>此快照 README 列出的支持是 DeepSeek-V4.1-Flash、NVIDIA SM100 与 Ascend 950。它开放了离线推理核心，包括模型、kernels、并行、推测验证、异步调度等。</p>
+<p>README 同时列出完整推理服务仍需补充的 KV cache system、VE/Prefill/Decode disaggregation 和 P/D DP 副本负载均衡；引擎已经具备其中不少底层能力。<strong>源码有本地 KV/block 管理，不能把这句话翻译成“DeepInfer 没有 KV cache”。</strong>它欠缺的是完整服务层系统，而不是完全不存 K/V。<a href="#src-d1">D1</a>、<a href="#src-d2">D2</a></p>
+<h3>8.2 调用主线</h3>
+<pre><code class="language-text">examples/offline_inference.py
+          │
+          ▼
+Python LLMEngine
+          ├─ 请求/输出管理、step、abort、延迟释放
+          ├─ C++ Scheduler / Sequence / BlockManager
+          └─ Worker.execute_model_step
+                  ├─ ModelRunner / 模型 / 定制 kernels
+                  ├─ MTP/DSpark 与 sampler
+                  └─ DP/CP/EP、EPLB
+</code></pre>
+<p>源码阅读锚点：<code>deepinfer/engine/llm_engine.py</code>、<code>csrc/engine/scheduler.hpp</code>、<code>block_manager.hpp</code>、<code>mtp_varlen.hpp</code>、<code>deepinfer/worker/worker.py</code>。<a href="#src-d2">D2</a>、<a href="#src-d3">D3</a></p>
+<p>C++ 实现调度可能减少部分 Python 对象和解释器成本，但“用了 C++”本身不是性能结论。若关键路径是大规模通信或设备计算，换语言未必解决主要瓶颈。</p>
+<h3>8.3 异步调度的具体顺序</h3>
+<p>Worker 中的主要顺序是：</p>
+<pre><code class="language-text">本轮 main model forward
+→ 上一轮 post-process
+→ 本轮 sample
+→ 本轮 post-process 立即进行或延后到下一轮
+</code></pre>
+<p>配合 GPU 端长度修正、事件同步与延迟释放，把部分 CPU 工作放进设备计算期间。这和 SGLang overlap、vLLM 异步执行要解决的瓶颈有共性，正确性机制各有实现。</p>
+<p><code>zero-overhead</code> 是项目对该机制的命名，不代表所有负载的 CPU 成本实测为零。<a href="#src-d4">D4</a></p>
+<h3>8.4 三个最值得深入的机制</h3>
+<p><strong>置信度验证预算。</strong><code>MTPVarlen</code> 根据 confidence 估计“多验证一个候选 token 能带来多少有效输出”，再结合设备 step 时间选预算。它包含启动基线和在线耗时修正，不只是固定 nextn。第 11 章详细展开。<a href="#src-d3">D3</a></p>
+<p><strong>逐 step 的专家布局。</strong>EPLB 不是只追求长窗口总 token 平均分配；policy 利用逐 step 的负载向量，尝试减小同步执行中最忙 rank 导致的等待。热点 expert 可以有多个 physical 副本，代价是权重显存与重排搬运。<a href="#src-d5">D5</a></p>
+<p><strong>SWA bounded replay。</strong>对于兼容的 YoCo 模型配置，减少 decoder consumer 部分重复 Prefill 的范围；保留的后缀要覆盖滑窗与回退需求。示例推荐 140 token，不代表整个长 prompt 只需计算最后 140 token，也不能移植到任意 full-attention 模型。官方部署文章进一步说明 V4.1 的 SWA bounded replay 包含近似恢复，不能将其笼统描述为所有 attention 状态的精确重建；见第 21 章引用的官方来源。<a href="#src-d6">D6</a></p>
+<h3>8.5 优势与代价</h3>
+<p><strong>优势：</strong>模型和硬件边界明确，容易看到“模型结构 → 缓存布局 → kernel → 图尺寸 → scheduler”的完整协同，而不是把每个优化孤立理解。</p>
+<p><strong>代价：</strong>适配范围较窄、完整服务栈需要补齐，里面某个高效实现可能依赖专用算子、checkpoint 或并行拓扑。你学到的应是约束与优化目标，不是把所有文件拷到通用引擎里。</p>
+<p><strong>学习顺序：</strong>等你已理解普通 KV、连续 batch 和 speculative verify 后，再读 <code>mtp_varlen.hpp</code> 与 <code>worker.py</code>，收获会明显更大。</p>
+<p><a id="ch9"></a></p>
+<h2>9. 内核、CUDA Graph 与异步执行</h2>
+<h3>9.1 为什么框架需要自定义 kernel</h3>
+<p>Python 调用一个算子只是提交工作。真正决定设备效率的因素包括：如何分块、怎样从 HBM 搬到片上存储、哪些中间结果可以不写回、不同计算能否融合，以及并行通信能否和计算重叠。</p>
+<p>FlashAttention 类方法减少 attention 中间矩阵的显存读写；Paged Attention 支持分页 KV 访问。二者解决的问题不同，可以在同一个 attention backend 中结合。量化 GEMM、MoE dispatch/combine 和采样也都有各自优化空间。</p>
+<p>三个框架都有执行后端与特化 kernels，不能只看 Python scheduler 给它们打分。DeepInfer 的 README 列出了 FlashMLA、DeepGEMM、DeepEP 等依赖；vLLM/SGLang 的后端也会随模型与硬件选择。<a href="#src-d1">D1</a>、<a href="#src-v1">V1</a>、<a href="#src-s1">S1</a></p>
+<h3>9.2 CUDA Graph：少做重复提交</h3>
+<p>Decode 每轮往往调用相似的一组算子。CUDA Graph 把可重复的设备执行结构捕获后再 replay，减少 CPU launch 开销。它不是编译一个“任何 batch 都能随意变化”的通用执行图。</p>
+<p>动态 batch 通常需要若干预捕获尺寸与 padding：真实 11 条请求可能使用更大的图档位。相应代价包括：图准备时间、内存、额外 padding 工作和支持范围限制。</p>
+<p>这使 scheduler 需要知道“选择更多 token 是否跨入更贵的图档位”。动态推测预算如果只看接受率、不看 graph 阶梯成本，可能作出错误选择。</p>
+<p>CUDA Graph 是 NVIDIA 机制；不能直接用其名词描述 Ascend 的实现。跨硬件可以讨论减少 launch/sync 和固定执行结构的共同目标，但实现要分别验证。</p>
+<h3>9.3 异步不是越多越好</h3>
+<pre><code class="language-text">同步（示意）：
+CPU:  [计划 n]              [收尾 n][计划 n+1]
+GPU:          [执行 n]                         [执行 n+1]
+
+重叠（示意）：
+CPU:  [计划 n] [准备后续工作/收尾上一轮] ...
+GPU:          [执行 n                  ][执行 n+1 ...]
+</code></pre>
+<p>重点是减少设备等待 CPU 的空隙。必须同时处理：</p>
+<ul>
+<li>CPU 提前预测的序列长度与设备实际接受长度是否一致；</li>
+<li>block table 和 batch metadata 是否被下一轮覆写；</li>
+<li>sampler 的 grammar、RNG 与 stop 状态读哪一轮版本；</li>
+<li>已取消请求的在途输出是否丢弃；</li>
+<li>GPU 读完前的资源是否仍被 pin 住。</li>
+</ul>
+<p>因此写自己的框架时，<strong>先做同步参考实现，再做 overlap，并用参考实现检查输出与资源生命周期</strong>。吞吐提升不足以证明异步实现正确。<a href="#src-v2">V2</a>、<a href="#src-s2">S2</a>、<a href="#src-d4">D4</a></p>
+<h3>9.4 精度与确定性</h3>
+<p>低精度权重和 KV 可以省内存、减少带宽，但支持格式、缩放、校准和 kernel 不匹配会增加转换成本或损伤质量。不能只比较“都是 FP8”而忽略具体格式与量化方法。</p>
+<p>确定性又是另一维度：不同 batch 组成、reduction 顺序、随机数消费、推测路径都可能改变输出。DeepInfer 将 batch invariance 与 deterministic sampling 分开，后者有固定 seed、关闭 MTP_VARLEN 等条件；SGLang 也有 backend/缓存路径限制。<a href="#src-d1">D1</a>、<a href="#src-s9">S9</a></p>
+<p>学习时把三件事分开验收：数学分布是否正确、给定参考条件下数值误差是否可接受、是否要求逐 token 可复现。</p>
+<p><a id="ch10"></a></p>
+<h2>10. 多卡与 MoE：把一个模型拆开</h2>
+<h3>10.1 先记住每种并行拆什么</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>名称</th>
+<th>拆分对象</th>
+<th>收益</th>
+<th>主要代价</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>TP，Tensor Parallel</td>
+<td>一层的矩阵/head 等</td>
+<td>单层分摊显存和计算</td>
+<td>层间/层内频繁通信</td>
+</tr>
+<tr>
+<td>PP，Pipeline Parallel</td>
+<td>不同层放不同设备</td>
+<td>模型容量扩展</td>
+<td>pipeline bubble、阶段不均衡、调度复杂</td>
+</tr>
+<tr>
+<td>DP，Data Parallel</td>
+<td>数据/batch 或独立实例</td>
+<td>提高总服务能力</td>
+<td>路由、负载不均；MoE 下未必完全独立</td>
+</tr>
+<tr>
+<td>EP，Expert Parallel</td>
+<td>不同 expert 放不同设备</td>
+<td>容纳和并行执行 MoE experts</td>
+<td>all-to-all、热点、同步等待</td>
+</tr>
+<tr>
+<td>CP，Context Parallel</td>
+<td>同一序列的上下文计算</td>
+<td>长上下文容量/计算扩展</td>
+<td>attention 所需信息交换</td>
+</tr>
+</tbody>
+</table></div>
+<p>这是概念表。一个框架的 DP/CP flag 可能只影响某些模型阶段，不能仅根据名字推断所有 tensor 的布局。实际 TP、DP、EP 有时复用同一组设备，不应把所有数字随意相乘计算总卡数。<a href="#src-v6">V6</a>、<a href="#src-v9">V9</a>、<a href="#src-s8">S8</a>、<a href="#src-d1">D1</a></p>
+<h3>10.2 最容易误解的 DP</h3>
+<p><strong>独立 dense replicas：</strong>每个副本完整执行自己的请求，A 忙通常不会要求 B 做同一次 collective。</p>
+<p><strong>DP attention + EP MoE：</strong>attention 处理各自的请求，后面的 MoE 却要把 token 发给共同的 expert ranks。这里的 DP ranks 是耦合执行的。某个 rank 没有真实请求，也可能需要参与 dummy forward，保证通信顺序一致。</p>
+<p>这解释了为什么“给每个 rank 随机选择一个不同大小的验证图”可能破坏分布式执行；也解释了为什么 replica routing 和 rank 内 workload balance 要分开考虑。vLLM 的 DP 文档明确讨论了这种耦合。<a href="#src-v6">V6</a></p>
+<h3>10.3 MoE 怎样产生慢 rank</h3>
+<p>MoE 的 router 为 token 选择少量 experts。假设四个 rank 本轮分别得到 <code>[100, 95, 90, 220]</code> 单位工作。若它们需要在阶段末同步，其他 rank 会等 220 的那一个。</p>
+<p>EPLB 可以把热点逻辑 expert 复制成多个物理副本或重排布局，让未来工作更均衡。它不是把用户请求重新分配到另一个数据中心。</p>
+<p>还要注意“平均均衡”可能骗人：两步负载 <code>[200,0]</code> 与 <code>[0,200]</code> 的长窗均值是 <code>[100,100]</code>，但每步都等一个忙 rank。与每步 <code>[100,100]</code> 相比，同步成本可能很不同。这个教学例子解释了 DeepInfer 为什么关注逐 step 最忙 rank 的目标。<a href="#src-d5">D5</a></p>
+<h3>10.4 三者有什么不同</h3>
+<p>vLLM 和 SGLang 都有 EP/EPLB、通信后端和 overlap 路径；DeepInfer 在固定模型与硬件上组合 Attention DP、balanced CP、EP/EPLB。不能用“谁支持 MoE”来区分这几个版本。<a href="#src-v9">V9</a>、<a href="#src-s8">S8</a>、<a href="#src-d1">D1</a></p>
+<p>实际评估要看：完整实例拓扑、网络、token 分布、每 rank 峰值、冗余 expert 显存、迁移频率、通信与计算占比。单看总 GPU 利用率无法判断负载均衡是否有效。</p>
+<p><a id="ch11"></a></p>
+<h2>11. 推测解码：一次验证多个未来 token</h2>
+<h3>11.1 Draft → Verify → Commit</h3>
+<p>一个更便宜的 drafter 先猜未来若干 token，target model 对这些候选进行并行验证，接受其中一个前缀，拒绝后修正，然后继续。</p>
+<pre><code class="language-text">已知前缀 P
+Draft:   [a, b, c, d]
+Verify:   ✓  ✓  ✗
+Commit:  [a, b, 修正 token]
+丢弃：未被接受分支上的后续 KV / grammar / draft 状态
+</code></pre>
+<p>主模型一次处理多个已知候选位置，可能比逐轮单位置处理更高效；但 drafter、验证、采样和回滚都有成本。高 batch 已充分占满设备时，speculation 未必赚钱。</p>
+<h3>11.2 为什么不能只说“猜对就收，猜错就丢”</h3>
+<p>对 greedy decoding，比较主模型 argmax 可以给出简单直观的验证。但随机采样要保持 target 分布，需要更严格的接受/修正规则。</p>
+<p>经典线性 draft rejection sampling 中，候选由 <code>q</code> 产生，target 分布为 <code>p</code>，位置接受概率是：</p>
+<pre><code class="language-text">min(1, p(x) / q(x))
+</code></pre>
+<p>拒绝时从归一化的 <code>max(p−q, 0)</code> 修正分布采样；全部接受时还能从相应 target 条件分布产生 bonus token。这个结论有前提：正确使用相应条件上下文、精确记录采样分布并执行完整修正流程。不同树式/特化实现不能只套一行公式就宣布正确。<a href="#src-f1">F1</a></p>
+<p>temperature、top-p、grammar 等改变了实际分布，必须纳入算法定义。动态裁剪验证长度也不能窥视未来信息而改变应该保留的分布。工程上要一起检查 RNG、KV 和约束状态的回滚。</p>
+<h3>11.3 MTP、EAGLE、DSpark 与 speculative decoding 的关系</h3>
+<p>Speculative decoding 是一类执行方法；MTP、EAGLE、DSpark 等提供不同的 drafter 或配套结构。支持某种 MTP checkpoint 不代表自动拥有高接受率，也不代表支持任意动态验证。</p>
+<p>对于初学者，先区分三条独立的轴：</p>
+<ol>
+<li><strong>谁来猜？</strong>独立 draft model、模型自带预测模块等。</li>
+<li><strong>猜什么结构？</strong>线性 token 链、树、块。</li>
+<li><strong>算多少？</strong>固定 K、按 batch-size 选 K、逐请求/逐位置动态预算。</li>
+</ol>
+<p>只比较一个 <code>nextn</code> 参数会混淆这三件事。<a href="#src-v8">V8</a>、<a href="#src-s7">S7</a>、<a href="#src-d3">D3</a></p>
+<h3>11.4 用一组数理解动态预算</h3>
+<p>令 <code>s[i,k]</code> 表示请求 i 的前 k 个候选全部接受的概率，即 survival probability。它不是第 k 个 token 单独正确的概率。</p>
+<p>忽略 EOS、截断等边界，在每请求有一个主/bonus 输出的简化模型中：</p>
+<pre><code class="language-text">预计输出数 ≈ 请求数 B + Σ_i Σ_(k≤K_i) s[i,k]
+效率 ≈ 预计输出数 / 本轮总耗时
+</code></pre>
+<p>假设两条请求，最多各验证 3 个候选：</p>
+<pre><code class="language-text">A 的 survival = [0.9, 0.8, 0.7]
+B 的 survival = [0.6, 0.2, 0.1]
+</code></pre>
+<p>若本轮只分配 3 个额外候选预算，优先给 A 的三个位置可得到预计 <code>2+0.9+0.8+0.7=4.4</code> 输出，而给 A 两个、B 一个是 <code>4.3</code>。这只是局部分配示例；公平性、上限、图约束都可能改变实际选择。</p>
+<p>再假设有三种测得的执行成本（纯教学数字）：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th style="text-align: right;">额外验证预算</th>
+<th style="text-align: right;">预计输出</th>
+<th style="text-align: right;">本轮时间</th>
+<th style="text-align: right;">预计 token/s</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td style="text-align: right;">0</td>
+<td style="text-align: right;">2</td>
+<td style="text-align: right;">4 ms</td>
+<td style="text-align: right;">500</td>
+</tr>
+<tr>
+<td style="text-align: right;">3</td>
+<td style="text-align: right;">4.4</td>
+<td style="text-align: right;">6 ms</td>
+<td style="text-align: right;">733</td>
+</tr>
+<tr>
+<td style="text-align: right;">6</td>
+<td style="text-align: right;">5.3</td>
+<td style="text-align: right;">10 ms</td>
+<td style="text-align: right;">530</td>
+</tr>
+</tbody>
+</table></div>
+<p>最多验证不等于最高有效吞吐。这也是为什么 confidence 与成本模型要一起用。</p>
+<h3>11.5 三个版本的具体差异</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>路径</th>
+<th>依据什么调整</th>
+<th>调整对象</th>
+<th>必须知道的边界</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>DeepInfer MTPVarlen</td>
+<td>confidence survival、基线图耗时、在线 forward/sampler 修正</td>
+<td>总验证预算及各序列长度</td>
+<td>模型/硬件路径特定；涉及异步历史与采样正确性</td>
+</tr>
+<tr>
+<td>vLLM Adaptive Verification</td>
+<td>confidence 或在线接受率估计、启动时图成本</td>
+<td>请求/位置的验证预算</td>
+<td>默认关闭；full CUDA graph、backend 条件；无 PP/LoRA 等限制</td>
+</tr>
+<tr>
+<td>vLLM Dynamic SD</td>
+<td>用户配置的 batch-size → K 区间</td>
+<td>batch 对应的 draft 长度</td>
+<td>与 Adaptive Verification 不同；此路径 DP&gt;1 会回退静态</td>
+</tr>
+<tr>
+<td>SGLang EAGLE/EAGLE3 adaptive</td>
+<td>按 batch-size 桶的 accept-length EMA，滞回/更新周期</td>
+<td>预捕获 step 档位</td>
+<td>当前要求 topk=1；不是逐请求成本最优分配</td>
+</tr>
+<tr>
+<td>SGLang DSpark ragged verify</td>
+<td>confidence survival + SPS 表/时间成本</td>
+<td>总预算与逐请求 verify length</td>
+<td>非静态策略依赖 confidence；无有效 profile 时可能退化 verify-all</td>
+</tr>
+</tbody>
+</table></div>
+<p>依据：<a href="#src-d3">D3</a>、<a href="#src-v8">V8</a>、<a href="#src-s7">S7</a>。表中限制属于各自路径，不能从一行搬到另一行。</p>
+<p>vLLM 没有 confidence head 时存在从 draft logits 学习接受率的路径；这不意味着任意模型/后端都无条件可用。SGLang 的 DSpark 动态图协调也有具体 DP/PP/P-D 条件。最新三者已有交叉机制，不能继续使用“DeepInfer 独有自适应、另外两个都是固定 K”的旧比较。</p>
+<h3>11.6 哪些收益数字不能直接拿来用</h3>
+<p>正确的分子是实际有效输出，不是生成了多少 draft、验证了多少候选。DeepInfer 示例 benchmark 的原始 Decode 计数含全接受假设，绘图还可使用外部 acceptance 缩放；示例同时有强制负载均衡和计时过滤条件。它适合解释引擎能力边界，不能单独证明真实服务的 accepted-token 吞吐。<a href="#src-d7">D7</a></p>
+<p>你自己的验收应同时记录：draft 数、verified 数、accepted 数、实际 emitted 数、各阶段耗时和资源。每个指标的“+1 主/bonus token”口径都要写清。</p>
+<p><a id="ch12"></a></p>
+<h2>12. P/D 分离：把两个阶段部署开</h2>
+<h3>12.1 为什么想把它们拆开</h3>
+<p>Prefill 与 Decode 的 batch 形态、瓶颈和时延目标不同。放在同一个实例上，长 Prefill 可能干扰已有请求的 ITL；分开后可以独立调整 P 与 D 的资源比例和执行配置。</p>
+<p>但分开后 KV 必须从 P 到 D，且两边要协调请求状态。收益应覆盖网络、buffer、协议、排队和额外资源成本。<strong>P/D 的价值常是更好地满足 TTFT/ITL 目标，不是自动增加同样资源下的原始吞吐。</strong>vLLM 的 P/D 文档也明确提醒吞吐不一定提高。<a href="#src-v7">V7</a></p>
+<h3>12.2 跟踪一条请求的状态</h3>
+<p>下面是一条概念路径；不同 connector 的 push/pull、chunk 传输和首 token 归属会不同。</p>
+<pre><code class="language-text">ROUTED
+  → P_QUEUED
+  → P_RUNNING
+  → KV_READY / TRANSFERRING
+  → D_READY
+  → D_RUNNING
+  → FINISHED / ABORTED
+</code></pre>
+<p>每个转换都要有明确的所有权：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>时刻</th>
+<th>必须回答的问题</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>选中 P、D</td>
+<td>D 不健康或容量不够，谁重试、谁取消已发给 P 的工作？</td>
+</tr>
+<tr>
+<td>P 计算中</td>
+<td>D 是否已经为尚未到达的 KV 预留了空间？</td>
+</tr>
+<tr>
+<td>传输中</td>
+<td>P 的源页何时可释放，D 的目的页何时可被 attention 读取？</td>
+</tr>
+<tr>
+<td>传输完成</td>
+<td>数据、block metadata、位置、模型版本是否一致？</td>
+</tr>
+<tr>
+<td>用户取消</td>
+<td>两边是否都收到终止，重试是否会重复释放或重复输出？</td>
+</tr>
+<tr>
+<td>worker 故障</td>
+<td>重算还是失败？旧传输完成事件能否误写新请求的页？</td>
+</tr>
+</tbody>
+</table></div>
+<p>共享 KV 的格式不是只有一个 byte buffer：layer 顺序、TP 分片、KV 精度、页布局、模型状态都必须一致或有受支持的转换。</p>
+<h3>12.3 提前预留还是 Prefill 完成后预留</h3>
+<p><strong>提前预留 D 空间：</strong>能尽早确认目的容量，可能重叠 Prefill 与 chunk transfer；但长 Prefill 尚未完成时，D 的 KV 空间就被占住。</p>
+<p><strong>晚预留：</strong>P 完成后再争取 D 空间，减轻 D 的提前占用；但可能让 P 更久保留结果，增加等待，损失部分传输 overlap。</p>
+<p>SGLang v0.5.22 新增 opt-in <code>prefill_complete</code> decode allocation policy，正是这个取舍。它有很窄的组合边界：Mooncake/Python bootstrap、attention TP/CP=1、PP=1 等；与若干 staging、role switching、Decode HiCache 等模式不兼容。所有通信 worker 要同版本、同策略。不要把它当成所有 P/D 部署都能开的选项。<a href="#src-s6">S6</a></p>
+<p>release 中该策略约 26.8% throughput、48.9% p95 TTFT 改善来自指定 GLM-5.2-NVFP4 的 Decode KV 压力场景，是同一路径下策略变化的实验，<strong>不是 SGLang 对 vLLM 的跑分</strong>。<a href="#src-s0">S0</a></p>
+<h3>12.4 三个项目的切入点</h3>
+<ul>
+<li>vLLM：从 KV connector 合约和具体 backend 的兼容矩阵切入；本版本 P/D 文档仍标 experimental。</li>
+<li>SGLang：从 scheduler 的 P/D event loop、bootstrap、传输、gateway 与 HiCache 联动切入。</li>
+<li>DeepInfer：从引擎服务 hooks 和执行机制切入；公开包并未给出完整可直接部署的 P/D 服务系统。</li>
+</ul>
+<p>依据：<a href="#src-v7">V7</a>、<a href="#src-s6">S6</a>、<a href="#src-d2">D2</a>。它们均不等价于跨集群全局容量调度。</p>
+<p><a id="ch13"></a></p>
+<h2>13. 三个项目的优劣与选型</h2>
+<h3>13.1 一个有用的比较表</h3>
+<p>下面的“优势/代价”是基于前述架构的工程判断；没有用未运行的 benchmark 给性能排名。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>维度</th>
+<th>vLLM v0.32.0</th>
+<th>SGLang v0.5.22</th>
+<th>DeepInfer 固定快照</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>公开范围</td>
+<td>通用推理与服务框架</td>
+<td>通用推理运行时及缓存/路由相关能力</td>
+<td>特定模型/硬件的离线推理核心</td>
+</tr>
+<tr>
+<td>读代码的抓手</td>
+<td>请求 token 进度、SchedulerOutput、KV manager、Executor</td>
+<td>Req/ScheduleBatch、event loop、radix/统一缓存</td>
+<td>LLMEngine、C++ scheduler、Worker 与专用执行路径</td>
+</tr>
+<tr>
+<td>Prefix/cache</td>
+<td>hash block、hybrid 管理、connector</td>
+<td>radix/组件化混合缓存、HiCache</td>
+<td>本地块/状态管理；完整 KV 服务需补齐</td>
+</tr>
+<tr>
+<td>推测验证</td>
+<td>多 drafter 与 adaptive verification，另有 Dynamic SD</td>
+<td>EAGLE adaptive 与 DSpark ragged 等不同路径</td>
+<td>DSpark/confidence 与在线时间修正结合</td>
+</tr>
+<tr>
+<td>P/D</td>
+<td>connector 扩展，逐项核对兼容性</td>
+<td>较直接的 P/D、gateway、HiCache 集成路径</td>
+<td>服务集成边界开放，完整系统未包含</td>
+</tr>
+<tr>
+<td>MoE/并行</td>
+<td>EP/EPLB、DP/TP/PP/CP 等依配置支持</td>
+<td>EP/EPLB、DP/TP/PP/CP 等依配置支持</td>
+<td>明确的 Attention DP/balanced CP、MoE EP/EPLB</td>
+</tr>
+<tr>
+<td>最值得学</td>
+<td>可扩展引擎边界与统一调度抽象</td>
+<td>缓存、调度和服务生命周期的联动</td>
+<td>模型、硬件与执行策略的协同</td>
+</tr>
+<tr>
+<td>主要开发成本</td>
+<td>扩展点多，组合兼容和通用抽象复杂</td>
+<td>状态路径多，缓存/异步/推测组合复杂</td>
+<td>适配范围与完整服务能力需要自己扩展</td>
+</tr>
+</tbody>
+</table></div>
+<p>各行证据在第 6～12 章及资料索引。这个表不意味着某项目在其他列缺少能力。</p>
+<h3>13.2 按需求作决定</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>你的主要目标</th>
+<th>优先阅读/验证</th>
+<th>为什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>学会设计一个通用最小引擎</td>
+<td>vLLM 主循环，再对照 SGLang</td>
+<td>先建立请求、KV、计划与执行边界</td>
+</tr>
+<tr>
+<td>多轮对话、大量公共前缀、长文档复用</td>
+<td>SGLang radix/HiCache 与 vLLM prefix/connectors 同测</td>
+<td>缓存收益依赖分布、搬运成本和路由亲和</td>
+</tr>
+<tr>
+<td>多模型/多硬件/多 LoRA 的平台</td>
+<td>先建立 vLLM 通用基线，同时查 SGLang 所需组合</td>
+<td>覆盖和兼容性比抽象吞吐排名更先决</td>
+</tr>
+<tr>
+<td>固定大 MoE、追求具体拓扑下的效率</td>
+<td>两个通用框架实测；DeepInfer 用于机制对照</td>
+<td>最新版本均有大量 MoE 与模型特化优化</td>
+</tr>
+<tr>
+<td>学习调度/内核/模型共同设计</td>
+<td>DeepInfer 的 Worker、MTPVarlen、EPLB</td>
+<td>优化目标和模型假设较集中可见</td>
+</tr>
+<tr>
+<td>打造线上 P/D 服务</td>
+<td>先跑通 vLLM 或 SGLang 受支持组合</td>
+<td>服务状态机、失败恢复和兼容矩阵是主要工程量</td>
+</tr>
+</tbody>
+</table></div>
+<p>我的建议是：<strong>开发入门以一个正确的单卡同步引擎为主线；读 vLLM 学边界，读 SGLang 学缓存与生命周期，读 DeepInfer 学如何把性能优化做深。</strong>不需要一开始决定“只站一个框架”。</p>
+<h3>13.3 什么时候值得自己做</h3>
+<p>可以先区分“教学框架”和“生产框架”：</p>
+<ul>
+<li>为学习做自己的最小引擎很有价值，你会真正理解 KV、调度与采样。</li>
+<li>为生产从零重写，应有明确无法通过现有扩展点解决的需求，例如特殊模型状态或硬件执行限制，以及维护投入。</li>
+<li>如果只是某个模型缺一个 kernel，或者某种负载需要不同准入策略，先在现有框架中做有边界的改动，更容易隔离收益和验证正确性。</li>
+</ul>
+<p>性能框架不是越小越先进，也不是功能越多就越适合你。要优化的对象必须先明确。</p>
+<h3>13.4 对现有 路由/容量系统的联系</h3>
+<p>在本文的分层中，跨集群路由器 在跨集群分流层。引擎变化会改变各集群的服务时间、缓存命中、batch 效率与可满足 SLO 的容量，从而改变上层输入；它不因此成为跨集群路由算法。</p>
+<p>建议先固定请求分布与路由策略，比较引擎/配置；收益成立后，再按模型、硬件、并行拓扑、缓存状态和关键选项重新标定容量 profile。这里给的是实验方法，没有推断你们当前线上版本、参数或容量。</p>
+<p><a id="ch14"></a></p>
+<h2>14. 无需 GPU 的动手实验</h2>
+<p>配套文件：<strong><code>inference_lab.py</code></strong>，与本手册放在同一目录。只用 Python 标准库，推荐 Python 3.11+。</p>
+<pre><code class="language-bash">python3 inference_lab.py --test
+python3 inference_lab.py --demo
+</code></pre>
+<h3>14.1 实验真正做了什么</h3>
+<p>它包含一个固定随机权重、未训练的单层单头 causal attention toy model：token/位置输入 → Q/K/V → attention → 残差/非线性 → logits → greedy token。</p>
+<p>你会看到：</p>
+<ul>
+<li>每次重算完整前缀，与增量 KV 计算的 logits 对比；</li>
+<li>逻辑 token 位置如何映射到物理页；</li>
+<li>满页前缀复用，尾页保持请求私有；</li>
+<li>同一 scheduler 中交错推进多个请求；</li>
+<li>Prefill 最后一个位置产生首 token；</li>
+<li>中途取消与页回收；</li>
+<li>页不足时等待，以及无法继续时明确失败；</li>
+<li>清掉闲置 prefix cache 后，所有物理页均归还。</li>
+</ul>
+<p>toy model 没有训练，生成的整数不承载语言能力。调度器模拟 batch 选择，但数值计算逐 token 执行，不是向量化 GPU batch。它没有真实 GPU kernels、异步、采样随机性、LoRA、MoE、分布式通信、层级缓存或真实时间模拟。prefix 身份固定在一个模型实例内，也不实现生产多租户缓存策略。</p>
+<h3>14.2 为什么这个实验有学习价值</h3>
+<p>很多入门示例只写 <code>model.generate()</code>，把真正需要学习的内存与状态全部藏起来。这里刻意让块分配、引用、提交和终止可见，同时用独立的完整前缀参考计算检查增量路径。</p>
+<p>源码函数按阅读顺序：</p>
+<pre><code class="language-text">TinyModel.full_logits / step
+→ PagePool
+→ PrefixCache
+→ Request
+→ Engine.tick
+→ tests / demo
+</code></pre>
+<p>运行测试的实际结果记录在同目录 <code>inference_lab_test_result.txt</code>。它只能证明该教学实现测试范围内的行为，不是三个正式框架的正确性或性能报告。</p>
+<h3>14.3 建议做的四个修改</h3>
+<ol>
+<li>改小 <code>page_size</code>，观察物理页数与尾页浪费的变化；不要从 Python 执行时间推断 GPU 最佳页大小。</li>
+<li>改小 <code>token_budget</code> 或 <code>prefill_chunk</code>，观察首 token 和完成轮次如何改变。</li>
+<li>去掉 B 的公共前缀，比较 B 实际重算的 token 数。</li>
+<li>让请求在 Prefill 中和 Decode 中分别取消，检查在无活跃请求且清缓存后页池是否全部归还。</li>
+</ol>
+<p><strong>实验先不实现异步释放。</strong>这是有意保留的下一阶段练习：给每批工作加完成事件，让 cancel 只做逻辑终止，等事件完成再回收页。不能只在现有同步代码外套一个线程就认为完成了。</p>
+<p><a id="ch15"></a></p>
+<h2>15. 实现自己的框架：分阶段路线</h2>
+<p>以下按验收成果组织，而不是承诺几周就能写出生产引擎。</p>
+<h3>阶段 A：可作为裁判的正确参考实现</h3>
+<p><strong>目标：</strong>单请求、同步、greedy、标准 causal Transformer。</p>
+<p>先用一个小模型和成熟张量库实现完整前缀 forward，再实现增量 KV。先不写 CUDA，不做分页，不做服务接口。选一个明确 checkpoint，固定 tokenizer、chat template、权重和位置编码。</p>
+<p><strong>验收：</strong>同一前缀完整重算 vs KV 增量 logits 在容差内一致；短/长序列、位置边界、EOS、max_new_tokens 均通过。测试还要比较实际生成 token 与 teacher-forced 固定 token 轨迹，避免随机输出分叉掩盖数值问题。</p>
+<h3>阶段 B：单卡 batch 与分页 KV</h3>
+<p><strong>目标：</strong>不同长度请求组成 batch，KV 不预留到最大输出长度。</p>
+<p>先让 Runner 接收平铺 token、位置、seq lengths 与 block table。用现有可验证的 attention backend，先把布局接对；自写高性能分页 kernel 可以留到后面。</p>
+<p><strong>验收：</strong>batch 与单请求 logits 对齐；页边界前后正确；释放后页可重用；OOM 分配失败不破坏状态；反复循环请求无持续泄漏。</p>
+<h3>阶段 C：连续调度与 chunked prefill</h3>
+<p><strong>目标：</strong>显式 waiting/running、每轮 token/sequence budget、请求完成后补入新请求。</p>
+<p>设计“计划—预留—执行—提交”的状态边界。刚开始不做 preemption：内存不足就等待或清理闲置缓存，实在无法接入要清楚拒绝。之后再增加可恢复重算。</p>
+<p><strong>验收：</strong>混合长短请求能持续前进，冷请求不会无限饥饿，预算不超限；相同 teacher-forced 输入不因 batch 插队而错误；每个请求只终止一次。</p>
+<h3>阶段 D：API 与真实生命周期</h3>
+<p><strong>目标：</strong>提供最小 streaming API，支持取消、超时、过载拒绝和健康检查。</p>
+<p>Tokenizer、Detokenizer 与引擎核心分职责；明确 API 层认定断连后怎样传递取消。正确处理 stop string 跨 token、Unicode 增量和重复 cancel。</p>
+<p><strong>验收：</strong>客户端断连不会继续无限占用资源；队列有边界；请求已结束后不继续输出；worker 故障有明确错误语义。记录每个阶段的时间戳。</p>
+<h3>阶段 E：Prefix cache</h3>
+<p><strong>目标：</strong>共享不可变满页，建立 identity、引用与淘汰策略。</p>
+<p>从最简单的满块 hash 开始通常容易形成可测原型；如果你的目标是树式匹配/会话复用，再考虑 radix。不要因为某框架用了树，就在尚无需求时先实现最复杂的树。</p>
+<p><strong>验收：</strong>命中与不命中 logits 一致；不同模型/adapter/多模态输入不能误命中；活跃页不能被淘汰；缓存清理后引用正确。报告命中“节约的计算 token”，并非只报告命中请求百分比。</p>
+<h3>阶段 F：有 profiling 依据的性能优化</h3>
+<p><strong>目标：</strong>只解决已测出的主要瓶颈。</p>
+<p>CPU launch 明显时研究 CUDA Graph；小矩阵或多次中间落盘明显时研究融合；设备等待 CPU 时研究异步；KV 带宽明显时研究布局/精度。每次只改变少量可解释变量。</p>
+<p><strong>验收：</strong>同步参考与优化路径对齐；长时间运行无泄漏；profile 显示目标瓶颈确实减少；端到端 SLO goodput 提高，而非仅局部 kernel 更快。</p>
+<h3>阶段 G：推测解码</h3>
+<p><strong>目标：</strong>先 fixed-K 与正确 accept/reject/rollback，再做动态预算。</p>
+<p>从 greedy 线性 draft 验证开始理解状态，再实现有理论依据的随机采样。测试 KV、grammar、RNG 与缓存提交位置是否都能回退。只有实际接受率和耗时数据充分时，再引入 cost model。</p>
+<p><strong>验收：</strong>greedy 可与 target-only 对齐；随机路径做分布检验和质量评测；多个 K、EOS/stop、全部接受/首个拒绝/中途拒绝均正确；报告净有效输出，不用 draft 数代替。</p>
+<h3>阶段 H：分布式，再到 P/D</h3>
+<p><strong>目标：</strong>先一种并行拓扑，再增加 P/D 与缓存传输。</p>
+<p>先单机多卡 TP 或明确的模型并行，建立 rank 一致执行与故障行为；MoE EP、PP、CP 是不同工程问题，不必同时实现。P/D 之前先定义 KV layout 合约与所有权协议。</p>
+<p><strong>验收：</strong>collective 次序一致、单 rank 故障能终止/恢复、跨进程取消不泄漏、传输不会访问已复用页。之后才做动态伸缩或在线专家迁移。</p>
+<h3>开发顺序背后的原则</h3>
+<p>每一步都保留一个较慢但可信的参考路径。性能优化越深入，越需要它来定位问题。真正能独立开发框架的标志，是能说明一个优化改变了什么状态、依赖哪些假设、怎样被证伪，而不只是能复述优化名称。</p>
+<p><a id="ch16"></a></p>
+<h2>16. 如何证明正确、如何证明更快</h2>
+<h3>16.1 正确性不只有“回答看起来正常”</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>层次</th>
+<th>验证方法</th>
+<th>能抓到什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>数值</td>
+<td>固定 token 轨迹比较 logits/top-k/logprob</td>
+<td>mask、位置、KV、量化误差</td>
+</tr>
+<tr>
+<td>生成</td>
+<td>greedy、EOS/stop、max output、grammar/JSON/tool</td>
+<td>状态更新与输出协议错误</td>
+</tr>
+<tr>
+<td>随机</td>
+<td>固定条件下分布统计，配合质量集</td>
+<td>speculative correction / sampling 偏差</td>
+</tr>
+<tr>
+<td>生命周期</td>
+<td>cancel、重试、超时、OOM、worker crash</td>
+<td>双重释放、泄漏、重复输出</td>
+</tr>
+<tr>
+<td>并发</td>
+<td>batch 重排、插入/结束、异步压力</td>
+<td>metadata 映射、跨轮竞态</td>
+</tr>
+<tr>
+<td>组合</td>
+<td>prefix+spec、hybrid+grammar、PD+cancel 等</td>
+<td>单功能正确但交互错误</td>
+</tr>
+</tbody>
+</table></div>
+<p>两种浮点路径不一定逐 bit 相同；不同采样实现也不必生成相同句子。接受标准要由模型误差容忍、服务合同和确定性需求共同定义，不能只靠肉眼评判。</p>
+<h3>16.2 性能测试的分母与边界</h3>
+<p>建议固定请求 mix 和 SLO 后，定义：</p>
+<pre><code class="language-text">request goodput = 同时满足成功、TTFT 和指定 ITL 条件的请求数 / 测量时间
+SLO token goodput = 上述合格请求的真实输出 token 数 / 测量时间
+单位资源 goodput = goodput / 全部相关设备数
+</code></pre>
+<p>ITL 条件需要明确是每请求最大值、每请求 p95，还是其他合同；不同定义不能混比。按 token 加权可能偏向长输出，所以请求和 token 两个口径都保留。</p>
+<p>P/D/draft 的所有设备都要计入，异构硬件则额外比较实际成本。还要计入 CPU、网络、共享存储和缓存维护资源，不能把它们当免费。</p>
+<h3>16.3 可执行的对比矩阵</h3>
+<ol>
+<li><strong>固定输入条件：</strong>模型 revision、tokenizer/template、量化与质量、硬件、网络、总资源。</li>
+<li><strong>两种配置口径：</strong>双方共同支持配置；以及各自最佳配置但相同资源/SLO。两种结果分开呈现。</li>
+<li><strong>三类请求：</strong>短输入低延迟；长输入 Prefill 压力；多轮公共前缀复用。保留输出长度、到达间隔、取消比例。</li>
+<li><strong>三种负载区间：</strong>低负载、SLO 拐点、过载后恢复。</li>
+<li><strong>两种缓存状态：</strong>冷缓存与稳定热缓存，明确 warmup 是否排除。</li>
+<li><strong>完整窗口：</strong>含入队与排空；重复运行给波动范围，保留错误与超时。</li>
+</ol>
+<p>优先做 open-loop 到达率扫描观察排队增长；closed-loop 固定并发也有用，但客户端等响应再发下一条，会改变到达过程，可能掩盖过载。二者不是可互换的同一个实验。</p>
+<h3>16.4 哪些图最有信息量</h3>
+<ul>
+<li>横轴 offered request rate，纵轴 goodput，并标出 p95/p99 TTFT、ITL 何时越线。</li>
+<li>横轴并发/长度，纵轴每 step 耗时，拆 CPU、计算、通信、传输。</li>
+<li>cache hit tokens 与净 TTFT 改善，同时画 transfer/prefetch 等待。</li>
+<li>speculation 的 accepted/emitted 与 verify 时间，按 batch/context 分桶。</li>
+<li>KV active、reserved、evictable、free 与 preemption/retraction 同时观察。</li>
+</ul>
+<p>“tokens/s 更高”的单个数字，通常不足以决定线上迁移。</p>
+<h3>16.5 从引擎曲线到容量规划</h3>
+<p>引擎性能是一个随 batch、长度、缓存、硬件、并行与质量设置变化的函数，不是永久常数。分流/扩缩容改变 batch 形态后，原来的平均服务时间可能失效。</p>
+<p>因此把 profile 的适用范围和未知状态保留下来。缺样本、采集失败和过期不能当作零负载；本手册不以历史环境数据推导当前生产容量。这一点与跨集群路由的边界同样重要。</p>
+<p><a id="ch17"></a></p>
+<h2>17. 按问题阅读源码</h2>
+<p>不要逐文件从第一行读到最后一行。先定位一个问题，写下预期状态，再找修改这些状态的代码。下表路径均相对各项目根目录，链接见第 20 章。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>想回答的问题</th>
+<th>vLLM</th>
+<th>SGLang</th>
+<th>DeepInfer</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>一轮如何开始/结束？</td>
+<td><code>vllm/v1/engine/core.py</code></td>
+<td><code>python/sglang/srt/managers/scheduler.py</code> 的 event loops</td>
+<td><code>deepinfer/engine/llm_engine.py</code> 的 <code>step</code></td>
+</tr>
+<tr>
+<td>哪些 token 进入本轮？</td>
+<td><code>vllm/v1/core/sched/scheduler.py</code></td>
+<td><code>get_next_batch_to_run</code>、<code>ScheduleBatch</code></td>
+<td><code>csrc/engine/scheduler.hpp</code></td>
+</tr>
+<tr>
+<td>KV 谁分配/释放？</td>
+<td><code>kv_cache_manager.py</code>、<code>block_pool.py</code></td>
+<td><code>mem_cache/radix_cache.py</code>、<code>unified_radix_cache.py</code> 及 pool</td>
+<td><code>csrc/engine/block_manager.hpp</code>、<code>DeferredRelease</code></td>
+</tr>
+<tr>
+<td>GPU 执行在哪里？</td>
+<td>两条 <code>GPUModelRunner</code> 路径</td>
+<td><code>srt/model_executor/model_runner.py</code></td>
+<td><code>deepinfer/worker/worker.py</code> 及 model executor</td>
+</tr>
+<tr>
+<td>验证预算怎么选？</td>
+<td><code>worker/gpu/spec_decode/adaptive_verification.py</code></td>
+<td><code>speculative/dspark_components/dspark_planner.py</code></td>
+<td><code>csrc/engine/mtp_varlen.hpp</code></td>
+</tr>
+<tr>
+<td>服务 P/D 边界在哪里？</td>
+<td>connector 与 <code>disagg_prefill.md</code></td>
+<td>P/D event loops、<code>pd_disaggregation.mdx</code></td>
+<td><code>llm_engine.py</code> 的 KV 保存/提示发送 hooks</td>
+</tr>
+</tbody>
+</table></div>
+<p>建议做三张笔记：</p>
+<ul>
+<li><strong>状态表：</strong>每个字段谁写、谁读、在哪个线程/stream、属于哪一轮。</li>
+<li><strong>所有权表：</strong>页、请求、传输与缓存分别持有什么引用，谁负责终止。</li>
+<li><strong>时间线：</strong>CPU 计划、H2D、forward、sample、D2H、输出/释放如何交错。</li>
+</ul>
+<p>读完一个机制，试着解释它在“请求恰好取消”和“显存恰好不足”时的行为。如果解释不出来，说明只读懂了正常路径。</p>
+<p><a id="ch18"></a></p>
+<h2>18. 自测题与参考答案</h2>
+<h3>题目</h3>
+<ol>
+<li>为什么 Prefill 可以处理很多 token，普通 Decode 却不能随意一次生成几十个未来 token？</li>
+<li>GQA 模型算 KV 显存该用 query heads 还是 KV heads？</li>
+<li>Prefix hit 100% 是否意味着不需要再做任何模型计算？</li>
+<li>一个请求输出了 5 token，它的 KV 是否必定已经包含这 5 个？</li>
+<li>把页引用降为零后，为什么还可能不能立刻复用？</li>
+<li>vLLM hash 与 SGLang radix，是否一方有 prefix cache 而另一方没有？</li>
+<li>总 token budget 一样的两个 batch 是否应该耗时一样？</li>
+<li>两步 EP 负载 <code>[200,0]</code>、<code>[0,200]</code> 平均很均衡，为什么仍可能慢？</li>
+<li>speculation 的接受率提高，吞吐是否一定提高？</li>
+<li>SGLang adaptive EAGLE 与 DSpark ragged 是否是同一个算法？</li>
+<li>P/D 分离以后，为什么 D KV 不足可能影响 P 的生命周期？</li>
+<li>为什么 engine benchmark 的 tokens/s 不能直接代入 上层路由器 的跨集群容量模型？</li>
+</ol>
+<h3>参考答案</h3>
+<ol>
+<li>prompt 已知，可在因果 mask 下并行处理位置；未来 token 尚未确定，有自回归依赖。speculation 也只是先猜再验证。</li>
+<li>KV heads。query heads 与 KV heads 可不同；MLA/hybrid 还要另按实际状态计算。</li>
+<li>否。可能仍需恢复最后位置的 logits或进行边界计算，随后也要生成新 token；外置命中还有搬运成本。实现常会保留至少一个待算位置。</li>
+<li>否。刚采样出的末 token 通常要到下一轮才被作为输入写入 KV；预留槽位也不等于已有效写入。</li>
+<li>GPU/传输可能仍在读它；还需等待完成事件或解除在途 pin。不同实现中的引用字段未必覆盖所有所有权。</li>
+<li>两者都有；它们主要在前缀身份和索引/生命周期组织上不同。</li>
+<li>否。context 长度、P/D mix、attention 形态、graph padding、通信与缓存都影响时间。</li>
+<li>每一步都受最忙 rank 限制，均值掩盖了同步等待；需看逐 step 的最大值。</li>
+<li>不一定。更多 draft/verify、跨更大的图档位、采样与同步可能增加更大的成本。</li>
+<li>不是。前者按桶的 accept-length EMA 选择档位；后者可按 confidence 和成本分配 ragged 验证预算。</li>
+<li>P 需要保留源 KV，等 D 分配和传输完成；晚预留会把部分等待/驻留成本移到 P。</li>
+<li>benchmark 可能无排队、无真实接受率/缓存/故障开销，且 batch/长度不同；全局容量还受 SLO 与路由改变负载分布影响。</li>
+</ol>
+<p><a id="ch19"></a></p>
+<h2>19. 术语速查与常见误解</h2>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>术语</th>
+<th>本手册中的含义</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>token</td>
+<td>tokenizer 输出的基本整数单位</td>
+</tr>
+<tr>
+<td>logits</td>
+<td>采样前的词表分数</td>
+</tr>
+<tr>
+<td>sequence</td>
+<td>一条需要维护生成历史与状态的 token 序列</td>
+</tr>
+<tr>
+<td>KV cache</td>
+<td>保留历史 key/value 或相应模型状态以便增量计算</td>
+</tr>
+<tr>
+<td>block / page</td>
+<td>KV 的分配单位；具体字节布局依后端</td>
+</tr>
+<tr>
+<td>prefix hit</td>
+<td>复用同身份、同前缀的已有计算</td>
+</tr>
+<tr>
+<td>continuous batching</td>
+<td>每轮允许请求进入和离开 batch</td>
+</tr>
+<tr>
+<td>chunked prefill</td>
+<td>把长输入分多轮处理，保持完整语义</td>
+</tr>
+<tr>
+<td>scheduler</td>
+<td>选择本轮工作与预算的组件</td>
+</tr>
+<tr>
+<td>model runner</td>
+<td>将计划转成张量、设备执行与采样的组件</td>
+</tr>
+<tr>
+<td>rank</td>
+<td>分布式执行中的一个进程/参与者编号</td>
+</tr>
+<tr>
+<td>collective</td>
+<td>一组 rank 协同执行的通信操作</td>
+</tr>
+<tr>
+<td>preemption / retraction</td>
+<td>暂停或移出运行集合；恢复可能重算</td>
+</tr>
+<tr>
+<td>offload / prefetch</td>
+<td>向较慢层迁出 / 提前载回数据</td>
+</tr>
+<tr>
+<td>speculative decoding</td>
+<td>draft 候选经 target 验证后提交的生成方法</td>
+</tr>
+<tr>
+<td>survival probability</td>
+<td>到某候选位置为止的整个前缀被接受的概率</td>
+</tr>
+<tr>
+<td>EPLB</td>
+<td>专家并行内部的专家负载均衡</td>
+</tr>
+<tr>
+<td>P/D</td>
+<td>Prefill 与 Decode 分阶段部署/执行</td>
+</tr>
+<tr>
+<td>SLO</td>
+<td>服务必须达到的时延、成功率等目标</td>
+</tr>
+<tr>
+<td>goodput</td>
+<td>满足目标的有效工作率，口径必须明确</td>
+</tr>
+</tbody>
+</table></div>
+<p><strong>常见误解，读完后应能自己纠正：</strong></p>
+<ul>
+<li>“Paged KV 会减少模型本来需要存的所有 KV。”——主要减少分配浪费并支持共享/回收，不改变模型本身的状态需求。</li>
+<li>“开 prefix cache 就能让所有多轮请求命中。”——前缀、模型身份、容量、路由和布局都要匹配。</li>
+<li>“动态 batching 等于更大的 batch 永远更好。”——可能恶化 ITL/尾延迟。</li>
+<li>“多机 EP 就是多集群路由。”——一个是同步模型执行，一个是独立服务资源间分流。</li>
+<li>“支持某功能等于支持任意功能组合。”——hybrid state、speculation、P/D、LoRA、图执行常有交互边界。</li>
+<li>“DeepInfer 的公开包等于完整线上 DeepSeek 服务。”——公开范围明确更窄。</li>
+<li>“vLLM 只会 PagedAttention，SGLang 只会 RadixAttention。”——这会漏掉当前两者的大部分服务与执行能力。</li>
+<li>“一个性能冠军图足以决定迁移。”——先核对模型质量、资源、到达过程、缓存、实际输出和 SLO。</li>
+</ul>
+<p><a id="ch20"></a></p>
+<h2>20. 版本固定的资料索引</h2>
+<p>以下是本手册项目结论的主要依据。源码固定 SHA；release 页面用于确认版本与发布说明。基础数值例子、接口和开发路线为教学推导/建议，不是项目 benchmark。</p>
+<h3>通用原理</h3>
+<p><a id="src-f1"></a>
+<strong>[F1]</strong> 经典随机推测采样的算法前提：<a href="https://proceedings.mlr.press/v202/leviathan23a.html">Fast Inference from Transformers via Speculative Decoding，原始论文</a>。这里只用来解释经典线性 rejection sampling，不声称所有当前实现都使用同一个变体。</p>
+<h3>vLLM</h3>
+<p><a id="src-v0"></a>
+<strong>[V0]</strong> <a href="https://github.com/vllm-project/vllm/releases/tag/v0.32.0">v0.32.0 release</a>。</p>
+<p><a id="src-v1"></a>
+<strong>[V1]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/README.md">README：模型、硬件、服务和功能范围</a>。</p>
+<p><a id="src-v2"></a>
+<strong>[V2]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/engine/core.py">EngineCore：step 与在途 batch 队列</a>；<a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/engine/async_llm.py">AsyncLLM</a>。</p>
+<p><a id="src-v3"></a>
+<strong>[V3]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/core/sched/scheduler.py">Scheduler：统一 token 进度、分配与 preemption</a>。</p>
+<p><a id="src-v4"></a>
+<strong>[V4]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/design/prefix_caching.md">Prefix caching 设计</a>；<a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/core/kv_cache_manager.py">KVCacheManager</a>；<a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/core/block_pool.py">BlockPool</a>。</p>
+<p><a id="src-v5"></a>
+<strong>[V5]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/design/hybrid_kv_cache_manager.md">Hybrid KV cache manager 设计</a>。注意该文档开头声明的历史撰写基线；分组/布局细节还应与 [V4] 当前源码交叉阅读。</p>
+<p><a id="src-v6"></a>
+<strong>[V6]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/serving/data_parallel_deployment.md">Data parallel deployment：路由、EP 耦合、dummy forwards</a>。</p>
+<p><a id="src-v7"></a>
+<strong>[V7]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/features/disagg_prefill.md">Disaggregated prefill：connector 与兼容矩阵</a>。</p>
+<p><a id="src-v8"></a>
+<strong>[V8]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/features/speculative_decoding/adaptive_verification.md">Adaptive verification 文档</a>；<a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/worker/gpu/spec_decode/adaptive_verification.py">实现</a>；<a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/features/speculative_decoding/dynamic_speculative_decoding.md">独立的 Dynamic SD 路径</a>。</p>
+<p><a id="src-v9"></a>
+<strong>[V9]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/docs/serving/expert_parallel_deployment.md">Expert parallel deployment：EPLB、DBO、通信后端</a>。</p>
+<p><a id="src-v10"></a>
+<strong>[V10]</strong> <a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/worker/gpu_model_runner.py">GPUModelRunner 路径</a>；<a href="https://github.com/vllm-project/vllm/blob/5df63a7203cdb9328d824a27b682e77c7b9928be/vllm/v1/worker/gpu/model_runner.py">GPU Model Runner V2 路径</a>。</p>
+<h3>SGLang</h3>
+<p><a id="src-s0"></a>
+<strong>[S0]</strong> <a href="https://github.com/sgl-project/sglang/releases/tag/v0.5.22">v0.5.22 release</a>。</p>
+<p><a id="src-s1"></a>
+<strong>[S1]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/README.md">README：项目范围、模型与硬件</a>。</p>
+<p><a id="src-s2"></a>
+<strong>[S2]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/managers/scheduler.py">Scheduler：normal/overlap/P-D event loops</a>；<a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/managers/schedule_batch.py">Req 与 ScheduleBatch</a>。</p>
+<p><a id="src-s3"></a>
+<strong>[S3]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/mem_cache/radix_cache.py">RadixCache：匹配、插入、淘汰、路径锁</a>。</p>
+<p><a id="src-s4"></a>
+<strong>[S4]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/mem_cache/unified_radix_cache.py">UnifiedRadixCache：多组件缓存状态</a>。</p>
+<p><a id="src-s5"></a>
+<strong>[S5]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/docs/docs/advanced_features/hicache_best_practices.mdx">HiCache best practices：L1/L2/L3 与 P/D</a>。</p>
+<p><a id="src-s6"></a>
+<strong>[S6]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/docs/docs/advanced_features/pd_disaggregation.mdx">P/D 文档与 prefill_complete 限制</a>；<a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/sgl-model-gateway/README.md">仓库内 gateway</a>。</p>
+<p><a id="src-s7"></a>
+<strong>[S7]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/docs/docs/advanced_features/speculative_decoding.mdx">Speculative decoding</a>；<a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/docs/docs/advanced_features/adaptive_speculative_decoding.mdx">EAGLE adaptive</a>；<a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/speculative/dspark_components/dspark_planner.py">DSpark planner</a>；<a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/speculative/dspark_components/dspark_sps.py">SPS cost</a>。</p>
+<p><a id="src-s8"></a>
+<strong>[S8]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/docs/docs/advanced_features/expert_parallelism.mdx">Expert parallelism：EP/EPLB 与 overlap</a>。</p>
+<p><a id="src-s9"></a>
+<strong>[S9]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/docs/docs/advanced_features/deterministic_inference.mdx">Deterministic inference：backend 与缓存兼容边界</a>。</p>
+<p><a id="src-s10"></a>
+<strong>[S10]</strong> <a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/managers/tokenizer_manager.py">TokenizerManager</a>；<a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/managers/detokenizer_manager.py">DetokenizerManager</a>；<a href="https://github.com/sgl-project/sglang/blob/baa9befa381511cd4d56f83980951e5a45fffc6d/python/sglang/srt/model_executor/model_runner.py">ModelRunner</a>。</p>
+<h3>DeepInfer</h3>
+<p><a id="src-d1"></a>
+<strong>[D1]</strong> <a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/README.md">README：开源范围、模型/硬件、依赖与确定性</a>。</p>
+<p><a id="src-d2"></a>
+<strong>[D2]</strong> <a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/deepinfer/engine/llm_engine.py">LLMEngine：step、abort、DeferredRelease、服务 hooks</a>；<a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/csrc/engine/scheduler.hpp">C++ Scheduler</a>；<a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/csrc/engine/block_manager.hpp">BlockManager</a>。</p>
+<p><a id="src-d3"></a>
+<strong>[D3]</strong> <a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/csrc/engine/mtp_varlen.hpp">MTPVarlen：confidence、预算、成本估计与异步历史</a>。</p>
+<p><a id="src-d4"></a>
+<strong>[D4]</strong> <a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/deepinfer/worker/worker.py">Worker：forward / previous post-process / sample</a>。</p>
+<p><a id="src-d5"></a>
+<strong>[D5]</strong> <a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/deepinfer/model_executor/eplb/policy.py">EPLB policy</a>。</p>
+<p><a id="src-d6"></a>
+<strong>[D6]</strong> <a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/examples/yoco/README.md">YoCo bounded replay 与等价性测试</a>。</p>
+<p><a id="src-d7"></a>
+<strong>[D7]</strong> <a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/examples/README.md">Benchmark 说明</a>；<a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/examples/benchmark.py">benchmark.py</a>；<a href="https://github.com/deepseek-ai/DeepInfer/blob/8b16149741a4935e1dec8cea27853f273b374c5b/examples/sweep/plot_pareto.py">plot_pareto.py</a>。</p>
+<hr />
+<p><strong>证据与实验边界：</strong>项目比较以固定源码/官方文档为依据，示例数字均注明教学性质。CPU 配套实验单独验证了 toy 实现；本次没有跑正式框架的 GPU/NPU benchmark，也不代表任何特定企业的线上引擎配置。文中的开发路线和优先级是据此提出的工程建议。</p>
+<p><a id="ch21"></a></p>
+<h2>21. 负载均衡专题：官方部署说明与 DualPath 组内调度</h2>
+<p><strong>本章的证据范围。</strong><a href="https://zhuanlan.zhihu.com/p/2095560295930508953">DeepSeek 官方部署说明</a>是 DeepSeek 已认证机构号发布的《DeepSeek V4.1 Flash 大规模推理部署实践》，读取时页面标注编辑于 2026-10-20。它说明生产系统中尚未完整开源的负载均衡和缓存服务，不能当成全部已在公开仓库中实现。本章的 DualPath 算法核对自 <a href="https://arxiv.org/html/2602.21548v2#S6">arXiv v2 第 6 节</a>，该版本页面日期为 2026-02-26。知乎引用的是 SIGCOMM 2026 会议版，标题与 arXiv 版不同；这里不声称核对过会议终稿或生产私有代码。</p>
+<h3>21.1 这篇文章的参考价值在哪里</h3>
+<p>它最有价值的地方是补齐“引擎之外怎样把系统组织起来”。读的时候，把三种证据分开：开源代码能证明具体实现；官方部署文章能证明作者披露的生产设计；论文能说明算法和实验条件。三者能相互解释，但不能无条件互换。</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>学习问题</th>
+<th>官方部署说明补充的事实</th>
+<th>对设计自己系统的启发</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>Prefill 的负载怎么算</td>
+<td>按输入总长分桶，再按拟合的 attention 计算代价分配请求和 chunk</td>
+<td>请求数、未命中 token 数、真实耗时是三种不同量</td>
+</tr>
+<tr>
+<td>Decode 为什么不能只数请求</td>
+<td>同时平衡请求数和 KV 总长度；引用 DualPath 的组内规则</td>
+<td>并发决定 batch 的一部分成本，历史长度影响 attention 与显存</td>
+</tr>
+<tr>
+<td>为什么不按前缀亲和路由</td>
+<td>Block KV 放在独立共享存储，所有 Prefill 可读取任意前缀</td>
+<td>缓存架构决定路由可自由选择的范围</td>
+</tr>
+<tr>
+<td>扩缩容怎样应对长尾</td>
+<td>P/D 分开估算需求，实例下线包含宽限期与剩余请求/KV 转移</td>
+<td>扩缩容需要与请求生命周期和迁移协议一起设计</td>
+</tr>
+<tr>
+<td>哪些功能能直接复用</td>
+<td>KVCache 和负载均衡代码尚未完整开源</td>
+<td>设计说明不等于可直接运行的开源组件</td>
+</tr>
+</tbody>
+</table></div>
+<p>文章中的大集群吞吐、每卡收入和线上优化百分比是作者特定部署下的报告，不是三个框架公平对测的结果。不能据此计算你的成本优势，也不能把该文中的配置常量作为其他模型的默认值。</p>
+<h3>21.2 “组内”到底是哪一层</h3>
+<p>先建立这个层次，才能读懂同名的 scheduler：</p>
+<pre><code class="language-text">跨集群路由：新请求发给哪个服务集群？
+    ↓
+服务集群内：选择 Prefill / Decode 实例或 engine group
+    ↓
+组内请求分配：这一条请求交给哪个 attention DP rank / engine？
+    ↓
+单引擎迭代调度：本次 forward 取哪些请求、多少 token？
+    ↓
+MoE 专家调度：计算经过哪些专家副本，怎样避免某张卡变慢？
+</code></pre>
+<p>知乎 Decode Load Balancer 引用的 <strong>DualPath 组内调度是第三层</strong>，对应论文 §6.1 的 <strong>DE Scheduling Phase 2: within a group</strong>。论文 §6.2 的 <strong>Intra-Engine Scheduling</strong> 则是第四层，讲 Prefill 的 compute quota。不要因为中文都可以叫“内部调度”，就把它们当成同一算法。</p>
+<p>DualPath 的 group 是降低调度器交互压力的组织单位：同组全为 Prefill engines（PE）或全为 Decode engines（DE），同一节点上的 engines 属于同组，由 rank 0 leader 定期统一拉取任务。论文并未把这里的 group 定义为一个地理区域或独立服务集群，也不能把每个 group 都默认为单机。</p>
+<p>论文所称 global scheduler 是这一推理系统范围内的全局协调者。<strong>“global”这个词本身不意味着跨地域、跨数据中心或 上层路由器 级别的流量治理。</strong></p>
+<h3>21.3 Decode 为什么要同时看两个负载维度</h3>
+<p>对每个 Decode engine <code>e</code>，调度器关心：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>符号</th>
+<th>意义</th>
+<th>影响</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td><code>seq[e]</code></td>
+<td>已分配、尚未完成的请求数</td>
+<td>并发规模和每步 batch 成本</td>
+</tr>
+<tr>
+<td><code>tok[e]</code></td>
+<td>上述请求的 token 总数</td>
+<td>attention 历史长度、KV 显存以及相关数据搬运压力的代理量</td>
+</tr>
+<tr>
+<td><code>free_hbm[e]</code></td>
+<td>可用于新请求的剩余显存</td>
+<td>这个请求能否接入的硬约束</td>
+</tr>
+<tr>
+<td><code>len(r)</code></td>
+<td>本次分配为新请求计入的长度</td>
+<td>请求分配后对 token 负载的增量</td>
+</tr>
+</tbody>
+</table></div>
+<p><code>len(r)</code> 不能擅自解释为“精确预测了请求最终会生成多少 token”。论文该段没有给出未来输出长度预测器。自己实现时，需要定义清楚当前已知长度、预留输出空间和运行中增长如何分别记账。原始 token 数也只是在特定模型/硬件下使用的成本代理量，不是各模型通用的时间单位。</p>
+<p>例如两张卡都在跑 8 条请求：一张的每条上下文只有 1K，另一张每条都是 64K。least-connections 会认为它们一样忙，实际 attention 和 KV 压力可能相差很大。反过来，只按总 token 选择，也可能把大量短请求堆到一张卡，使其 batch 太大。这是同时看 <code>seq</code> 和 <code>tok</code> 的动机。</p>
+<h3>21.4 DualPath Decode 组内算法：逐步拆解</h3>
+<p>下面对应论文 §6.1。它是<strong>显存可行性约束下的双维度贪心分配</strong>；这句话是对算法的概括，不是论文给出的独立算法名称。</p>
+<p><strong>第一步：计算这一轮计划接纳的请求集合 R。</strong>把组内剩余 HBM 加总，从该组私有队列头开始，估算可以放进总剩余显存的前缀请求集合。这里暂时假设显存可以完美拼在一起，所以 <code>R</code> 是可接纳集合的上界。真实显存分散在不同卡上，后面还要逐卡验证。</p>
+<p><strong>第二步：计算 token 高水位 Z。</strong>设组内 engines 集合为 <code>E</code>：</p>
+<pre><code class="language-text">Z = 1.05 × (Σ tok[e] + Σ len(r)) / |E|
+             e ∈ E       r ∈ R
+</code></pre>
+<p>先把“已有负载 + 本轮准备新增负载”平均分到各卡，再放宽 5%。因此 <code>Z</code> 不是单卡显存容量，也不是固定的 105% GPU 利用率，更不是 goodput 的目标值。它是这次 fetch 的负载分界线。</p>
+<p><strong>第三步：逐条取私有队列的队首请求 r。</strong></p>
+<ol>
+<li>筛出显存足以接下 <code>r</code> 的卡。没有任何卡能装下时，本轮 fetch 结束；论文规则不会跳过队首继续挑更小的请求。</li>
+<li>在可接入的卡中，筛出 <code>tok[e] + len(r) ≤ Z</code> 的集合 <code>low</code>。</li>
+<li>如果 <code>low</code> 非空，在里面选 <code>seq[e]</code> 最小的卡：既不突破 token 高水位，又尽量平衡并发数。</li>
+<li>如果 <code>low</code> 为空，在所有可接入卡中选 <code>tok[e]</code> 最小的卡：优先控制 KV/token 压力，即使本次接入会越过 <code>Z</code>。</li>
+<li>分配后更新请求数、token 计数和显存预留，再处理下一个请求。</li>
+</ol>
+<p>教学伪代码如下。<code>estimate_kv_bytes</code>、并列候选的确定性选择是你需要补齐的工程接口，并非已公开的 DualPath 源码：</p>
+<pre><code class="language-python">R = queue_prefix_that_fits_aggregate_free_hbm(queue, engines)
+Z = 1.05 * (sum(e.tok for e in engines)
+            + sum(r.length for r in R)) / len(engines)
+
+assigned = []
+while queue:
+    r = queue[0]
+    feasible = [e for e in engines
+                if e.free_hbm &gt;= estimate_kv_bytes(r)]
+    if not feasible:
+        break
+
+    low = [e for e in feasible if e.tok + r.length &lt;= Z]
+    if low:
+        chosen = min(low, key=lambda e: e.seq)
+    else:
+        chosen = min(feasible, key=lambda e: e.tok)
+
+    reserve_and_assign(chosen, r)  # 同步更新 tok / seq / free_hbm
+    assigned.append((chosen, queue.pop(0)))
+</code></pre>
+<p>论文没有在该段规定并列候选如何打破平局、取消如何回滚预留、状态多久汇报一次，也没有证明该贪心策略全局最优。实现中必须补齐这些细节，不能把伪代码当成生产完整实现。</p>
+<h3>21.5 算一遍：为什么短请求会去 KV 更长的卡</h3>
+<p>以下数字只用于教学，<code>K</code> 统一表示千 token，不涉及真实 GPU 容量。假设三张卡都有足够 HBM，本轮队列里有一个 2K 的短请求和一个 12K 的长请求：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>卡</th>
+<th style="text-align: right;">当前 <code>tok</code></th>
+<th style="text-align: right;">当前 <code>seq</code></th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>A</td>
+<td style="text-align: right;">30K</td>
+<td style="text-align: right;">2</td>
+</tr>
+<tr>
+<td>B</td>
+<td style="text-align: right;">20K</td>
+<td style="text-align: right;">6</td>
+</tr>
+<tr>
+<td>C</td>
+<td style="text-align: right;">40K</td>
+<td style="text-align: right;">4</td>
+</tr>
+</tbody>
+</table></div>
+<p>计算：<code>Z = 1.05 × (30 + 20 + 40 + 2 + 12) / 3 = 36.4K</code>。</p>
+<p>先处理 2K 请求：A 接入后 32K、B 接入后 22K，都在阈值内；C 接入后 42K 超过阈值。A/B 中 A 的并发更低，所以选 A。<strong>虽然 B 的 token 更少，也不必选 B。</strong></p>
+<p>然后处理 12K 请求：A 已变成 32K，接入后会是 44K；B 接入后 32K；C 接入后 52K。只有 B 不超过阈值，所以选 B。最后 A/B/C 的 token 为 32K / 32K / 40K，请求数为 3 / 7 / 4。</p>
+<p>这正是“短请求补并发、长请求补 token 空间”的来源。不过算法没有固定的“短于多少 K 叫短请求”开关；选择结果由当前负载、此次 <code>Z</code>、请求长度和显存可行性共同决定。</p>
+<p>再看两个边界：</p>
+<ul>
+<li><strong>阈值不是拒绝线。</strong>如果可接入的卡接单后全都超过 <code>Z</code>，算法仍会选择其中 <code>tok</code> 最少的卡。把 <code>Z</code> 写成硬拒绝条件会改变算法。</li>
+<li><strong>组内总空闲显存不是可接入证明。</strong>两卡各剩 6 GiB，总共 12 GiB，队首请求需要单卡 8 GiB；总量看似足够，但没有一卡能接，fetch 停止。这是 <code>R</code> 只是上界的原因。</li>
+</ul>
+<h3>21.6 其余三种规则不要与它混淆</h3>
+<p><strong>DE 组间分配。</strong>论文还维护一个全局等待队列和每组的私有队列。收到 DE group 拉取时，把全局队列里的请求分到总 <code>tok</code> 最少的组，再做前述组内分配。论文明确说 DE 调度不保证全局 FIFO。这仍然是推理系统内部对 engine groups 的分配，不能自动等同于跨服务集群路由。</p>
+<p><strong>PE 请求分配。</strong>论文使用 token 上限 <code>β</code> 排除过载 PE；其余 PE 按节点读取队列是否低于 <code>α</code> 分为两档，优先在读取队列短的一档中选 <code>tok</code> 最小的 PE，以免存储 NIC 缺少后续工作。这里包含 I/O 供给均衡，并不是只追求最小请求队列。论文 Algorithm 1 对分配后的分类刷新没有展开，复现时要显式定义过载判断如何随更新生效。</p>
+<p><strong>KV 读取路径选择。</strong>PE/DE 选定后，比较两端节点的读取队列，在较短的一侧读取 KV。DualPath 允许传统的“存储 → P”以及“存储 → D → 计算网络 → P”路径，以利用 D 侧闲置的存储 NIC。两端同时拆分读取同一个请求是论文提出的后续方向，不应写成已实现默认机制。<a href="https://arxiv.org/html/2602.21548v2#S4">论文 §4–§6</a></p>
+<p>这套路径依赖存储网络、计算网络、RDMA 和 QoS 等基础条件。普通跨地域网络并不自动满足它的带宽和干扰假设。</p>
+<h3>21.7 Prefill compute quota：从“分 token”走向“分时间”</h3>
+<p>官方部署文章披露的 Prefill LB 有四个层次：</p>
+<ol>
+<li><strong>按输入总长分桶：</strong><code>&lt;16K / 16–64K / 64–256K / ≥256K</code>。各桶引擎数按上一轮 compute-quota 需求占比重分。</li>
+<li><strong>DP 组间：</strong>按剩余 compute-quota 拉取请求；由于共享 Block KV 使任意 Prefill 都可命中前缀，不做前缀亲和路由。</li>
+<li><strong>DP 组内：</strong>批量请求进入引擎后，逐个分给当前 compute-quota 负载最小的 DP rank。</li>
+<li><strong>单卡内：</strong>FIFO 处理，每轮设时间预算，通过拟合的 <code>cost(q,c)</code> 反解可计算的最大 chunk；<code>q</code> 是待计算 token 数，<code>c</code> 是已算前缀长度。</li>
+</ol>
+<p>为什么同样的 <code>q</code> 也不代表同样的 attention 代价？以普通 causal attention 的教学模型为例，本次计算的 query–key 对数量约为：</p>
+<pre><code class="language-text">pairs(q, c) = q*c + q*(q+1)/2
+</code></pre>
+<p><code>q=128</code> 时，<code>c=1K</code> 与 <code>c=100K</code> 的历史读取和点积规模差异很大。这个公式只帮助建立直觉，<strong>不是 V4.1 生产 cost 模型的已披露精确公式</strong>；SWA、压缩/稀疏 attention、硬件与并行策略都会改变拟合关系。拟合参数需要 profile，不能跨模型复制。</p>
+<p>DualPath arXiv §6.2 同样讨论按 attention 时间预算做 FIFO packing，但描述的是用二分查找缩小 chunk。当前知乎文章则描述拟合二次模型后反解。两者共享“按时间对齐各 rank”的思想，不应说成实现细节完全一样。</p>
+<p>一个建议的实现练习：建立请求 <code>(cached_tokens, new_tokens)</code> 的代价模型，分别运行固定 token chunk 和固定时间 quota，比较同步组里 <code>max(rank_attention_time) / mean(rank_attention_time)</code> 与 TTFT。训练和验证 profile 时使用不同长度组合，并保留模型误差和尾延迟，不只报告拟合平均误差。</p>
+<h3>21.8 与 vLLM / SGLang 怎样公平地比较</h3>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>对比对象</th>
+<th>能直接从本手册固定源码验证什么</th>
+<th>不能据此推出什么</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>vLLM engine scheduler</td>
+<td>token 进度、预算、KV 分配、抢占及分布式执行接口</td>
+<td>不能只看 scheduler.py 就断言整个部署没有实例负载均衡</td>
+</tr>
+<tr>
+<td>SGLang engine scheduler / gateway</td>
+<td>批调度、缓存组织与独立 gateway/P-D 路由层</td>
+<td>不能把 radix 命中逻辑当作所有路由与调度策略的总称</td>
+</tr>
+<tr>
+<td>DeepInfer 公共仓库</td>
+<td>引擎调度、并行执行、EPLB、推测解码等</td>
+<td>不能从官方部署文章反推 P/D LB 已完整开源</td>
+</tr>
+<tr>
+<td>DeepSeek 官方部署文章 + DualPath 论文</td>
+<td>生产设计披露与论文级调度规则</td>
+<td>不能证明所披露规则优于其他框架在你的负载下的实际配置</td>
+</tr>
+</tbody>
+</table></div>
+<p>如果当前关心负载均衡，比较对象应是“入口路由 + 缓存体系 + P/D 选择 + engine 调度”的整条链。比较各自一个叫 scheduler 的文件，容易把不同层次的设计放在一起。</p>
+<h3>21.9 对 上层路由器 的启发与可验证的下一步</h3>
+<p>沿用本文的分层：跨集群路由器 是跨集群分流。DualPath 的逐卡显存约束、组内 <code>Z</code> 和读取队列并不是它的直接替换件。最值得借鉴的是三条设计思路：</p>
+<ul>
+<li><strong>用能解释成本的负载量。</strong>在请求数之外区分历史长度、未命中长度、已知输出进度和缓存读取工作；但哪些量能在入口及时拿到，必须先核实。</li>
+<li><strong>把硬可行性与优化排序分开。</strong>可达、健康、模型兼容和容量可接纳是前提；其后的候选排序可以组合延迟、预计工作量和成本。不要把缺失指标当成“负载很低”。</li>
+<li><strong>按资源层级做决策。</strong>上层控制集群间流量，下层控制单卡/同步组内的 batch 和 KV；由下层发布带时间戳、适用模型/硬件和误差范围的服务能力，而不是让上层模拟所有 GPU 状态。</li>
+</ul>
+<p>下面是建议的离线研究流程，不代表已经上线，也不代表当前 上层路由器 已实现这些能力：</p>
+<div class="table-scroll"><table>
+<thead>
+<tr>
+<th>步骤</th>
+<th>产出</th>
+<th>验证标准</th>
+</tr>
+</thead>
+<tbody>
+<tr>
+<td>建立请求特征记录</td>
+<td>输入长度、可复用长度、未命中长度、输出长度、候选集群、状态时间戳</td>
+<td>未知/缺失/零值可区分；不把事后已知输出当成入口已知信息</td>
+</tr>
+<tr>
+<td>构建可校准的工作量模型</td>
+<td>Prefill 代价、Decode 活跃序列与历史长度、KV 读取压力</td>
+<td>在保留出的模型/长度/负载区间评估误差</td>
+</tr>
+<tr>
+<td>比较候选策略</td>
+<td>原有策略、最少请求、最少 token、双维度贪心等</td>
+<td>相同请求流、约束、失败/取消语义下比较</td>
+</tr>
+<tr>
+<td>闭环模拟与影子评估</td>
+<td>各集群队列与时延演化</td>
+<td>路由改变服务进度，不能直接把旧日志的下一秒队列当成新策略结果</td>
+</tr>
+<tr>
+<td>小范围负载实验</td>
+<td>SLO 内 goodput、TTFT/TBT 分位、失败率、资源开销</td>
+<td>包含长短混合、缓存冷热、突发、状态陈旧和异构集群</td>
+</tr>
+</tbody>
+</table></div>
+<p>尤其不要直接把 <code>1.05</code> 调进跨集群权重公式：它来自论文的组内负载分界。对于异构集群，需要先把“token 数”转成可比较的预计服务时间或剩余可用能力。这个转换是新设计，需要自己的证据。</p>
+<h3>21.10 阅读后应能回答的五个问题</h3>
+<ol>
+<li><strong>为什么队列里是短请求时，算法可能选 token 更多的卡？</strong>因为多张卡接入后都不超过 <code>Z</code>，此时比较的是 <code>seq</code>。</li>
+<li><strong>为什么全组显存总量足够，仍然接不下队首请求？</strong>显存分散在不同卡上，必须有一个候选卡能够容纳。</li>
+<li><strong><code>Z</code> 是显存上限吗？</strong>不是；显存可行性单独判断，所有候选都超过 <code>Z</code> 时仍可分配。</li>
+<li><strong>共享 KV 就一定应该放弃前缀亲和吗？</strong>不是；需要比较各路径的真实延迟、带宽和本地命中收益，官方文章的选择有其存储架构前提。</li>
+<li><strong>读懂 DualPath 后能直接替换跨集群路由吗？</strong>不能；可迁移的是负载建模与约束分层的思想，具体对象和状态语义需要重新设计。</li>
+</ol></article><div class="footer">源码分析与教学实验 · 未进行三个正式框架的 GPU/NPU 对测</div></main></body></html>

@@ -1,0 +1,13 @@
+test_allocation_failure_atomic_and_double_release (__main__.LabTests.test_allocation_failure_atomic_and_double_release) ... ok
+test_batch_chunk_page_variants_match_reference (__main__.LabTests.test_batch_chunk_page_variants_match_reference) ... ok
+test_cancel_prefill_decode_and_idempotence (__main__.LabTests.test_cancel_prefill_decode_and_idempotence) ... ok
+test_capacity_stall_reported_then_cancel_recovers (__main__.LabTests.test_capacity_stall_reported_then_cancel_recovers) ... ok
+test_eviction_reclaims_idle_cache (__main__.LabTests.test_eviction_reclaims_idle_cache) ... ok
+test_incremental_logits_against_full_reference (__main__.LabTests.test_incremental_logits_against_full_reference) ... ok
+test_reject_oversized_and_invalid_requests (__main__.LabTests.test_reject_oversized_and_invalid_requests) ... ok
+test_shared_prefix_and_private_tail (__main__.LabTests.test_shared_prefix_and_private_tail) ... ok
+
+----------------------------------------------------------------------
+Ran 8 tests in 0.037s
+
+OK
